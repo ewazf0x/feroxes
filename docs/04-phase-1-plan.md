@@ -795,3 +795,41 @@ The planning sandbox has no access to the npm registry and no container runtime,
 - Kiro Web **Settings → Sandbox → Internet access** set to *Common dependencies* (it includes npmjs.org). If `registry.npmjs.org` is still blocked, add `.npmjs.org` to the custom allow-list ([Kiro docs](https://kiro.dev/docs/web/sandbox/internet-access)).
 - GitHub connected under **Settings → Integrations**, and the Feroxes repository selected when the session starts ([Kiro docs](https://kiro.dev/docs/web/github)).
 - Integration tests that need Postgres run in CI (GitHub Actions service container with `pgvector/pgvector:pg18`) whenever the sandbox can't start containers.
+
+## 14. Implementation status
+
+Updated 2026-11-07. The planning sandbox could not reach the npm registry or run containers, so this round implemented everything that doesn't need Postgres, Fastify or Next.js, and tested it with zero-install tooling: Node's built-in test runner, TypeScript 7 for type checking, and the only runtime dependency, Zod.
+
+### Done (90 tests, all passing)
+
+| Milestone | Status | What exists |
+|---|---|---|
+| M0 Platform skeleton | Partial | Workspace, tsconfig (TS 7, strict, erasable syntax so Node runs `.ts` directly), CI workflow, `.env.example`, config validation, AES-256-GCM vault with key rotation and purpose binding, argon2id password hashing, CLI. Missing: Fastify server, auth sessions, migration runner |
+| M1 Data model | Not started | Store interfaces exist for every table in §5; in-memory implementations back the tests. Drizzle schema and migrations need npm |
+| M2 Intelligence layer | Done | Router (§7.1–7.2), circuit breakers, rate-limit headroom, cost estimator with calibration (§7.3), complexity classifier (§7.6), adapters for OpenAI, OpenAI-compatible, Anthropic, Gemini, and a mock provider. Adapters are tested against wire-format fixtures; a live smoke test with real keys is still needed |
+| M3 Metering | Done | Prices with effective dates and cache/context tiers, ledger, budgets with atomic reservations and interactive reserve (§7.4), thresholds, power modes and admission (§7.5), anomaly detection |
+| M4 Policy and tools | Done | Presets, hard floor, taint escalation (§7.11), kill switch (§7.12), approvals, hash-chained audit with verifier (§7.13), Tool Runtime with idempotency and output shaping, sandboxed files, SSRF-safe web fetch |
+| M5 Agent runtime | Done | Persisted runs and steps, streaming loop, approvals that survive restarts, resume of interrupted background runs, loop and limit guards, six-layer cache-friendly context with compaction (§7.7) |
+| M6 Memory engine | Mostly done | Hybrid retrieval (§7.9), extraction and reconciliation with fixed rules (§7.8), supersede, evidence, undo, suppression, sensitivity filtering, session episodes, nightly merge/importance/core block, daily digest, JSONL export. Missing: Postgres store with HNSW indexes, encrypted `pg_dump` backups, weekly/monthly roll-ups |
+| M7 API and web UI | Not started | Needs Fastify and Next.js |
+| M8 Hardening | Not started | |
+
+Acceptance criteria from §11 already covered by tests: 1 (failover), 2 (accounting, per call), 3 (budgets under concurrency), 4 (memory scenarios), 6 (kill switch, in-process), 7 (approval across restart, exactly once), 8 (audit tamper detection). The rest need the database, the API or the UI.
+
+### Decisions changed during implementation
+
+| Planned | Built | Why |
+|---|---|---|
+| Vercel AI SDK 6 provider packages under the adapters | Direct HTTP adapters (fetch + SSE parser) | No registry access in the sandbox, and direct adapters give exact control over cache breakpoints, rate-limit headers and error classification. The `ProviderAdapter` interface is unchanged, so an AI SDK-backed adapter can still be added |
+| Vitest | Node's built-in `node:test` for server packages | Zero dependencies and fast. Vitest can still be used for the web app |
+| `@node-rs/argon2` | `crypto.argon2` built into Node ≥ 24.7 | One less native addon, which matters on the ARM VM |
+| Money as `numeric(14,8)` | Integer nano-dollars in code, `numeric(18,9)` in Postgres | Exact sums under concurrency; embedding calls don't round to zero |
+
+### Next steps (in order)
+1. Push this branch and open a PR (needs a GitHub repository, see the session summary).
+2. In a session with npm access: `pnpm install`, commit the lockfile, CI green.
+3. M1: Drizzle schema and migrations for §5, Postgres implementations of every store interface, Testcontainers integration tests.
+4. M0 remainder: Fastify server, owner setup and login, sessions, host allowlist, health endpoints, single-Core lease.
+5. pg-boss scheduler: debounced extraction, session episodes, nightly consolidation, reservation sweeper, backups.
+6. M7: REST + SSE API, then the Next.js PWA.
+7. Live smoke test against Anthropic, OpenAI, Gemini and OpenRouter with the owner's keys; verify seed model ids and prices.
