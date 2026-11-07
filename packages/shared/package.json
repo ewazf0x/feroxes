@@ -1,0 +1,10 @@
+{
+  "name": "@feroxes/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared primitives: ids, Result, errors, clock, logger, event bus, money, hashing, async helpers.",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

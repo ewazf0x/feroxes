@@ -1,0 +1,19 @@
+{
+  "name": "feroxes",
+  "private": true,
+  "type": "module",
+  "description": "Feroxes: a personal AI operating system for one owner.",
+  "engines": {
+    "node": ">=24.7"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test --test-reporter=spec \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\"",
+    "demo": "node apps/core/src/demo.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.0",
+    "typescript": "^7.0.2"
+  }
+}
