@@ -1,0 +1,15 @@
+{
+  "name": "@feroxes/tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tool SDK, registry, the Tool Runtime (the single policy gate for side effects), and built-in tools.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/policy": "workspace:*",
+    "@feroxes/shared": "workspace:*",
+    "zod": "^4.1.0"
+  }
+}
