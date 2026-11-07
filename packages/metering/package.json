@@ -1,0 +1,13 @@
+{
+  "name": "@feroxes/metering",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Usage ledger, pricing, budgets with reservations, power modes and admission control for every paid API.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/shared": "workspace:*"
+  }
+}
