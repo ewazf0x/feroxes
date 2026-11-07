@@ -6,4 +6,5 @@ export * from './estimator.ts';
 export * from './classifier.ts';
 export * from './router.ts';
 export * from './adapters/mock.ts';
+export * from './adapters/index.ts';
 export * from './testing.ts';
