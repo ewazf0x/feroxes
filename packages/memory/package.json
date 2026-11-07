@@ -1,0 +1,15 @@
+{
+  "name": "@feroxes/memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-layer memory: extraction, reconciliation, hybrid retrieval, consolidation, owner control, export.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/llm": "workspace:*",
+    "@feroxes/shared": "workspace:*",
+    "zod": "^4.1.0"
+  }
+}
