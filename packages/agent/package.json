@@ -1,0 +1,19 @@
+{
+  "name": "@feroxes/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent runtime: runs and steps, the tool-calling loop, context assembly, approvals, recovery.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/llm": "workspace:*",
+    "@feroxes/memory": "workspace:*",
+    "@feroxes/metering": "workspace:*",
+    "@feroxes/policy": "workspace:*",
+    "@feroxes/shared": "workspace:*",
+    "@feroxes/tools": "workspace:*",
+    "zod": "^4.1.0"
+  }
+}

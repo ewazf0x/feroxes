@@ -145,7 +145,7 @@ test('context block cites memory ids and keeps rules in the core block', async (
   await memory.remember({ content: 'Always answer in English unless the owner writes in French.', kind: 'rule' }, 'owner');
   const trip = await memory.remember({ content: 'The owner is flying to Lisbon on 12 December.', kind: 'event', occurredAt: Date.UTC(2026, 11, 12), importance: 0.4 }, 'owner');
   const ctx = await memory.buildContext({ query: 'when is my Lisbon flight?', maxSensitivity: 'private' });
-  assert.match(ctx.core, /Standing rules:\n- Always answer in English/);
+  assert.match(ctx.core, /Standing rules:\n- Always answer in English unless the owner writes in French\. \[m:[0-9a-f]{8}\]/);
   assert.ok(ctx.rendered.includes(`[m:${trip.id.slice(-8)}]`));
   assert.deepEqual(ctx.usedIds, [trip.id]);
 });

@@ -393,7 +393,8 @@ export class MemoryService {
     const sections = new Map<string, string[]>();
     let tokens = 0;
     for (const m of candidates) {
-      const line = `- ${m.content}`;
+      // Ids make core memories citable too, so the UI can show which ones an answer used.
+      const line = `- ${m.content} [m:${m.id.slice(-8)}]`;
       const t = approxTokens(line);
       if (tokens + t > budget) continue;
       const group = groups.find(([, f]) => f(m))![0];
