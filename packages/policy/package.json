@@ -1,0 +1,13 @@
+{
+  "name": "@feroxes/policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Permissions, autonomy presets, approvals, taint tracking, kill switch and the hash-chained audit log.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/shared": "workspace:*"
+  }
+}
