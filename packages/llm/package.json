@@ -1,0 +1,14 @@
+{
+  "name": "@feroxes/llm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Intelligence layer: provider adapters, model catalog, router with failover and circuit breakers, cost estimation, complexity classifier.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/metering": "workspace:*",
+    "@feroxes/shared": "workspace:*"
+  }
+}
