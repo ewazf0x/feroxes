@@ -1,0 +1,23 @@
+{
+  "name": "@feroxes/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Feroxes Core: composition root, configuration, vault, CLI.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "feroxes": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@feroxes/agent": "workspace:*",
+    "@feroxes/llm": "workspace:*",
+    "@feroxes/memory": "workspace:*",
+    "@feroxes/metering": "workspace:*",
+    "@feroxes/policy": "workspace:*",
+    "@feroxes/shared": "workspace:*",
+    "@feroxes/tools": "workspace:*",
+    "zod": "^4.1.0"
+  }
+}
