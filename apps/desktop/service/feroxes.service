@@ -1,0 +1,19 @@
+# Feroxes Core — systemd user service (24/7 background brain).
+# Install: see ./README.md. Edit the two paths below to match your machine.
+[Unit]
+Description=Feroxes Core
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Absolute path to the Node 24+ binary and to this repo's Core CLI.
+ExecStart=/usr/bin/node %h/code/feroxes/apps/core/src/cli.ts serve
+Restart=on-failure
+RestartSec=3
+# API keys etc. live here (see docs/08). Optional.
+Environment=NODE_NO_WARNINGS=1
+# EnvironmentFile=%h/.config/feroxes/.env
+
+[Install]
+WantedBy=default.target

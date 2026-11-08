@@ -1,0 +1,28 @@
+[package]
+name = "feroxes-desktop"
+version = "0.1.0"
+description = "Feroxes — your personal AI, on your PC"
+authors = ["Feroxes"]
+edition = "2021"
+rust-version = "1.90"
+
+# The library holds the app logic so the same code can target desktop and (later) mobile.
+[lib]
+name = "feroxes_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+
+# Smaller release binaries for the shipped app.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

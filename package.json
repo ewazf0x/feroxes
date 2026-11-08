@@ -10,9 +10,17 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test --test-reporter=spec \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\"",
     "demo": "node apps/core/src/demo.ts",
-    "check": "npm run typecheck && npm test"
+    "serve": "node apps/core/src/cli.ts serve",
+    "check": "npm run typecheck && npm test",
+    "ui": "node scripts/build-ui.mjs",
+    "icon": "node scripts/make-icon.mjs",
+    "desktop:stage": "node scripts/build-desktop.mjs",
+    "desktop:dev": "node scripts/build-ui.mjs && pnpm -C apps/desktop exec tauri dev",
+    "desktop:build": "node scripts/build-desktop.mjs && pnpm -C apps/desktop exec tauri icon icon.png --output src-tauri/icons && pnpm -C apps/desktop exec tauri build",
+    "tauri": "tauri"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@types/node": "^26.6.0",
     "typescript": "^7.0.2"
   }

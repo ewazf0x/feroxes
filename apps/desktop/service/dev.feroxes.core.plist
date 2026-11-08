@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Feroxes Core - launchd LaunchAgent (24/7 background brain). Install: see ./README.md.
+     Edit the two <string> paths to match your machine (Node binary, Core CLI). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.feroxes.core</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/Users/you/code/feroxes/apps/core/src/cli.ts</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/feroxes-core.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/feroxes-core.err.log</string>
+</dict>
+</plist>

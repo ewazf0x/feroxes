@@ -1,0 +1,101 @@
+name: Desktop
+
+# Builds the Feroxes PC app installers for macOS, Windows and Linux. Run manually from the Actions
+# tab, or automatically when a version tag (v*) is pushed. Artifacts are attached to each run.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # Node 24+ runs the bundled Core: node:sqlite is built in from this version.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev file
+
+      - run: pnpm install --no-frozen-lockfile
+
+      # Keep the installer honest: the Core must typecheck and pass its tests before we ship it.
+      - name: Verify the Core
+        run: pnpm run check
+
+      # Build the UI, compile the Core to a self-contained JS tree, and stage Tauri resources.
+      - name: Stage desktop resources
+        run: pnpm run desktop:stage
+
+      # Bundle the exact Node runtime we just used, so the installed app needs nothing pre-installed.
+      - name: Bundle the Node runtime
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/src-tauri/resources/runtime
+          NODE_BIN="$(node -e 'process.stdout.write(process.execPath)')"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "$NODE_BIN" apps/desktop/src-tauri/resources/runtime/node.exe
+          else
+            cp "$NODE_BIN" apps/desktop/src-tauri/resources/runtime/node
+            chmod +x apps/desktop/src-tauri/resources/runtime/node
+          fi
+
+      - name: Generate app icons
+        working-directory: apps/desktop
+        run: pnpm exec tauri icon icon.png --output src-tauri/icons
+
+      - name: Build the app
+        working-directory: apps/desktop
+        run: pnpm exec tauri build --target ${{ matrix.target }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: feroxes-${{ matrix.target }}
+          if-no-files-found: ignore
+          path: |
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*-setup.exe

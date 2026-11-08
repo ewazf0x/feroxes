@@ -2,7 +2,7 @@
 
 A personal AI agent for one owner that runs on the owner's own PC. It keeps a long-term memory and a stable identity, spreads work across several AI providers within a budget, controls the owner's PC and Android phone, speaks and listens, works on the owner's goals in the background, and explains everything it does. The owner stays in control of every action.
 
-> **Status (2026-11-08):** the Core is implemented and tested (121 tests, all passing). It includes model routing with failover, budgets, the policy gate and audit log, memory, the agent, SQLite storage that survives restarts, the device hub with PC and phone tools, the voice pipeline, and the brain layer (self-model, goals, debate, situation awareness, reflection, briefings). The native desktop and Android apps are next; see [Revision 2](docs/06-revision-pc-apps-brain.md).
+> **Status (2026-11-08):** the Core is implemented and tested (137 tests, all passing): model routing with failover, budgets, the policy gate and audit log, memory, the agent, SQLite storage that survives restarts, the device hub with PC and phone tools, the voice pipeline, the brain layer (self-model, goals, debate, situation awareness, reflection, briefings), and Kiro as the main brain. The **PC app** is built: a premium web UI (`apps/desktop/ui`), a local API (`apps/core` `serve`), and a native **Tauri 2** shell (`apps/desktop/src-tauri`) that launches the Core and connects to it. The Core-side packaging is verified end to end; the Rust shell is compiled and bundled into installers by the **Desktop** CI workflow. See [08 — Desktop app](docs/08-desktop-app.md). The Android app is next; see [Revision 2](docs/06-revision-pc-apps-brain.md).
 
 ## Try it
 
@@ -21,12 +21,27 @@ node --env-file=.env apps/core/src/cli.ts chat
 pnpm run typecheck && pnpm test
 ```
 
+### The PC app
+
+```bash
+# Run the Core as a local service (the window connects to it; also opens in a browser at the URL)
+pnpm run serve
+
+# Build the native desktop installer (.dmg / .msi / .AppImage). Needs Rust + the Tauri OS deps.
+pnpm run desktop:build
+```
+
+See [08 — Desktop app](docs/08-desktop-app.md) for the architecture, the 24/7 background Core, and
+how CI builds installers for macOS, Windows and Linux.
+
 In `chat`: `/goals`, `/goal <title>`, `/self`, `/why`, `/briefing`, `/reflect`, `/growth`, `/devices`, `/pair`, `/usage`, `/budget`, `/memories`, `/mode economy`, `/stop`, `/resume`. Risky actions ask inline; device actions can be allowed for the whole task. Data is saved in `./data/feroxes.db`.
 
 ## Documents
 
 | Doc | Contents |
 |---|---|
+| [08 Desktop app](docs/08-desktop-app.md) | **The PC app:** Tauri shell, attach-or-spawn the Core, self-contained packaging, the 24/7 background Core, building installers |
+| [07 Kiro as the brain](docs/07-kiro-brain.md) | Kiro as the main reasoning engine, with API models as fallback |
 | [06 Revision 2](docs/06-revision-pc-apps-brain.md) | **Current decisions:** PC-hosted Core with SQLite, native apps, device control, voice, the brain layer, Kiro, status of every requested capability, new roadmap |
 | [01 Architecture](docs/01-architecture.md) | Original system design (components, flows, memory, router, safety model) |
 | [02 Tech stack](docs/02-tech-stack.md) | Technologies, versions and alternatives |
@@ -50,7 +65,9 @@ In `chat`: `/goals`, `/goal <title>`, `/self`, `/why`, `/briefing`, `/reflect`, 
 | `packages/devices` | Device hub: pairing, signed commands, STOP, owner-activity pause; PC and phone tools; `code.kiro`; simulator |
 | `packages/voice` | ElevenLabs Scribe STT and Flash TTS, sentence streaming, push-to-talk, spoken STOP |
 | `packages/brain` | Self-model, goals, skills, debate, situation awareness, owner state, reflection, briefings, explanations, scheduler |
-| `apps/core` | Composition root, provider catalog, vault, CLI, demo |
+| `apps/core` | Composition root, provider catalog, vault, CLI, demo, local API server (`serve`) |
+| `apps/desktop/ui` | The PC app's web UI: design tokens, a dependency-free reactive core, every screen, command palette |
+| `apps/desktop/src-tauri` | The native Tauri 2 shell that launches the Core and hosts the UI |
 
 ## Non-negotiables
 
