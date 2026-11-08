@@ -32,13 +32,14 @@ export function memoryTools(memory: MemoryService): AnyTool[] {
       importance: z.number().min(0).max(1).default(0.7),
       sensitivity: z.enum(['normal', 'private', 'secret']).default('normal'),
       people: z.array(z.string().max(80)).max(5).default([]),
+      forever: z.boolean().default(false).describe('The owner said "remember this forever": pinned, top importance, always in context'),
     }),
     risk: { category: 'internal_write', reversible: true },
     idempotent: false,
     async execute(input, ctx) {
       // The owner asked for this in the conversation, so it counts as owner-stated.
       const m = await memory.remember(
-        { content: input.content, kind: input.kind, importance: input.importance, sensitivity: input.sensitivity, source: 'owner_asserted', entities: input.people.map((name) => ({ name, kind: 'person' as const })), sources: [{ sourceType: 'run', sourceId: ctx.runId }] },
+        { content: input.content, kind: input.kind, importance: input.forever ? 1 : input.importance, pinned: input.forever, sensitivity: input.sensitivity, source: 'owner_asserted', entities: input.people.map((name) => ({ name, kind: 'person' as const })), sources: [{ sourceType: 'run', sourceId: ctx.runId }] },
         'agent',
         { runId: ctx.runId, reason: 'saved at the owner\'s request', priority: 'interactive' },
       );

@@ -12,12 +12,17 @@
   },
   "dependencies": {
     "@feroxes/agent": "workspace:*",
+    "@feroxes/brain": "workspace:*",
+    "@feroxes/devices": "workspace:*",
     "@feroxes/llm": "workspace:*",
     "@feroxes/memory": "workspace:*",
     "@feroxes/metering": "workspace:*",
     "@feroxes/policy": "workspace:*",
+    "@feroxes/protocol": "workspace:*",
     "@feroxes/shared": "workspace:*",
+    "@feroxes/store-sqlite": "workspace:*",
     "@feroxes/tools": "workspace:*",
+    "@feroxes/voice": "workspace:*",
     "zod": "^4.1.0"
   }
 }

@@ -1,135 +1,163 @@
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fakeDesktop } from '@feroxes/devices';
 import { type AdapterRequest, type LlmMessage, MockAdapter, type MockResponse, type ModelEntry } from '@feroxes/llm';
 import { formatUsd, noopLogger } from '@feroxes/shared';
 import { resolveCatalog } from './catalog.ts';
 import { loadEnv } from './config.ts';
-import { createFeroxes } from './container.ts';
+import { createFeroxes, type Feroxes } from './container.ts';
 
 /**
- * Keyless end-to-end demo: the real router, budgets, memory, policy gate, approvals, audit and
- * kill switch, with scripted mock providers standing in for Anthropic, OpenAI, Gemini, OpenRouter.
+ * Keyless end-to-end demo: the real router, budgets, SQLite storage, memory, brain, device hub,
+ * voice pipeline, policy gate and audit — with scripted providers standing in for Anthropic,
+ * OpenAI, Gemini, OpenRouter and ElevenLabs, and a simulated PC.
  */
-const lastUser = (msgs: LlmMessage[]) => {
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i]!;
-    if (m.role === 'user') return typeof m.content === 'string' ? m.content : '';
-  }
-  return '';
-};
+const text = (m: LlmMessage) => (typeof m.content === 'string' ? m.content : m.content.map((p) => (p.type === 'text' ? p.text : '')).join(' '));
+const lastUser = (msgs: LlmMessage[]) => text([...msgs].reverse().find((m) => m.role === 'user') ?? { role: 'user', content: '' });
+const reply = (t: string, chunks = 3): MockResponse => ({ steps: [{ kind: 'text', text: t, chunks }] });
+const tool = (name: string, args: unknown): MockResponse => ({ steps: [{ kind: 'tool', name, args }] });
 
 /** A tiny rule-based "model" so the demo behaves like a real assistant. */
 function demoBrain({ request }: { model: ModelEntry; request: AdapterRequest }): MockResponse {
   const msgs = request.messages;
   const last = msgs.at(-1)!;
-  const allText = msgs.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
-  if (request.output?.name === 'memory_candidates') return { steps: [{ kind: 'text', text: '{"candidates":[]}' }] };
-  if (request.output) return { steps: [{ kind: 'text', text: '{"action":"add","reason":"demo"}' }] };
+  const system = text(msgs[0] ?? { role: 'system', content: '' });
+  const all = msgs.map(text).join('\n');
+  if (request.output?.name === 'memory_candidates') return reply('{"candidates":[]}', 1);
+  if (request.output) return reply('{"action":"add","reason":"demo"}', 1);
+  if (system.includes('briefing as their personal assistant')) {
+    const disk = /(\d+) GB free/.exec(lastUser(msgs))?.[1];
+    return reply(`Good morning! Your PC is online${disk ? ` but only has ${disk} GB of disk left, so let's clear some space today` : ''}. Your goal "Ship the desktop app" is at 0%, so I'd start with the Windows build. Nothing is waiting for your approval.`);
+  }
   if (last.role === 'tool') {
-    if (last.toolName === 'memory__save') return { steps: [{ kind: 'text', text: "Saved. I'll remember that." }] };
-    if (last.toolName === 'files__delete') return { steps: [{ kind: 'text', text: last.isError ? `I couldn't delete it: ${last.content}` : 'Done, the old notes file is gone.' }] };
-    return { steps: [{ kind: 'text', text: `Result: ${last.content.slice(0, 200)}` }] };
+    const r = last.content;
+    switch (last.toolName) {
+      case 'memory__save':
+        return reply("Saved. I'll remember that.");
+      case 'desktop__ui_tree':
+        return tool('desktop__act', { elementId: 'e1', action: 'set_value', value: 'Buy milk' });
+      case 'desktop__act':
+        return reply(last.isError ? `That didn't work: ${r}` : 'Done: I typed "Buy milk" into Notepad on your PC.');
+      case 'why__explain':
+        return reply(`Here is the trail:\n${r.split('\n').slice(0, 8).join('\n')}`, 1);
+      default:
+        return reply(`Result: ${r.slice(0, 200)}`);
+    }
   }
   const q = lastUser(msgs).toLowerCase();
-  if (q.startsWith('remember')) {
-    return { steps: [{ kind: 'tool', name: 'memory__save', args: { content: "The owner's sister is named Leila and lives in Lyon.", kind: 'relationship', people: ['Leila'], sensitivity: 'private', importance: 0.8 } }] };
-  }
+  if (q.startsWith('remember')) return tool('memory__save', { content: "The owner's sister is named Leila and lives in Lyon.", kind: 'relationship', people: ['Leila'], sensitivity: 'private', importance: 0.8 });
   if (q.includes('sister')) {
-    const line = allText.split('\n').find((l) => /sister is named/i.test(l));
+    const line = all.split('\n').find((l) => /sister is named/i.test(l));
     const id = /\[m:([0-9a-f]{8})\]/.exec(line ?? '')?.[1];
-    return { steps: [line ? { kind: 'text', text: `Your sister Leila lives in Lyon (m:${id}).`, chunks: 4 } : { kind: 'text', text: "I don't know yet." }] };
+    return reply(line ? `Your sister Leila lives in Lyon (m:${id}).` : "I don't know yet.");
   }
-  if (q.includes('delete')) return { steps: [{ kind: 'tool', name: 'files__delete', args: { path: 'notes/old.md' } }] };
-  return { steps: [{ kind: 'text', text: 'Hello! I am the Feroxes demo brain.' }] };
+  if (q.includes('notepad') && q.includes('write')) return tool('desktop__ui_tree', {});
+  if (q.includes('notepad')) return reply('Your notepad says "Buy milk". Want me to add anything?');
+  if (q.includes('why')) return tool('why__explain', {});
+  return reply('Hello! I am the Feroxes demo brain.');
+}
+
+/** Fake ElevenLabs: Scribe returns a fixed transcript, TTS returns placeholder audio bytes. */
+async function fakeElevenLabs(url: string, init: RequestInit): Promise<Response> {
+  if (url.includes('/v1/speech-to-text')) return Response.json({ text: "What's on my notepad?", language_code: 'en', words: [{ end: 1.6 }] });
+  const body = JSON.parse(String(init.body)) as { text: string };
+  return new Response(new Uint8Array(body.text.length * 120)); // ~120 bytes of "audio" per character
 }
 
 function log(line = '') {
   process.stdout.write(`${line}\n`);
 }
 
-export async function runDemo() {
-  const workspace = mkdtempSync(join(tmpdir(), 'feroxes-demo-'));
-  mkdirSync(join(workspace, 'notes'));
-  writeFileSync(join(workspace, 'notes', 'old.md'), 'old notes');
-  const env = loadEnv({ ...process.env, FEROXES_WORKSPACE_DIR: workspace, ANTHROPIC_API_KEY: 'demo', OPENAI_API_KEY: 'demo', GEMINI_API_KEY: 'demo', OPENROUTER_API_KEY: 'demo', FEROXES_TIMEZONE: process.env.FEROXES_TIMEZONE ?? 'UTC' });
-  const catalog = resolveCatalog(env);
-  const adapters = new Map(catalog.providers.map((p) => [p.id, new MockAdapter({ fallback: demoBrain, embedDims: 256 })]));
-  catalog.models.forEach((m) => {
-    if (m.modality === 'embedding') m.dimensions = 256;
-  });
-  const fx = await createFeroxes(env, { adapters, catalog, logger: noopLogger });
+async function chat(fx: Feroxes, sessionId: string, message: string, tier: 'fast' | 'balanced' = 'balanced') {
+  log(`\n  owner  › ${message}`);
+  process.stdout.write('  feroxes› ');
+  const off = fx.events.subscribe('run.delta', (e) => process.stdout.write(e.payload.text));
+  const run = await (await fx.runtime.sendMessage(sessionId, message, { tier })).done;
+  off();
+  if (run.status === 'waiting_approval') process.stdout.write('(waiting for your approval)');
+  else if (run.status !== 'completed') process.stdout.write(`(${run.status}: ${run.error ?? ''})`);
+  log(`\n           [${run.modelId ?? '-'} · ${run.totals.steps} step(s) · ${formatUsd(run.totals.costNanoUsd)}]`);
+  return run;
+}
 
-  const chat = async (sessionId: string, text: string, tier: 'fast' | 'balanced' = 'balanced') => {
-    log(`\n  owner  › ${text}`);
-    process.stdout.write('  feroxes› ');
-    const off = fx.events.subscribe('run.delta', (e) => process.stdout.write(e.payload.text));
-    const offReset = fx.events.subscribe('run.reset', () => process.stdout.write(' ⟲ '));
-    const { done } = await fx.runtime.sendMessage(sessionId, text, { tier });
-    const run = await done;
-    off();
-    offReset();
-    if (run.status === 'waiting_approval') process.stdout.write('(waiting for your approval)');
-    else if (run.status !== 'completed') process.stdout.write(`(${run.status}: ${run.error ?? ''})`);
-    else {
-      const msgs = await fx.agentStore.messages(sessionId);
-      const lastAssistant = msgs.at(-1);
-      if (lastAssistant?.role === 'assistant' && !lastAssistant.content.length) process.stdout.write('(no text)');
-    }
-    log(`\n           [${run.modelId ?? '-'} · ${run.totals.steps} step(s) · ${formatUsd(run.totals.costNanoUsd)}]`);
-    return run;
+export async function runDemo() {
+  const dir = mkdtempSync(join(tmpdir(), 'feroxes-demo-'));
+  mkdirSync(join(dir, 'workspace'));
+  writeFileSync(join(dir, 'workspace', 'notes.md'), 'old notes');
+  const env = loadEnv({ ...process.env, FEROXES_DATA_DIR: join(dir, 'data'), FEROXES_WORKSPACE_DIR: join(dir, 'workspace'), ANTHROPIC_API_KEY: 'demo', OPENAI_API_KEY: 'demo', GEMINI_API_KEY: 'demo', OPENROUTER_API_KEY: 'demo', ELEVENLABS_API_KEY: 'demo', FEROXES_TIMEZONE: process.env.FEROXES_TIMEZONE ?? 'UTC', FEROXES_OWNER_NAME: 'Sam' });
+  const boot = async () => {
+    const catalog = resolveCatalog(env);
+    catalog.models.forEach((m) => m.modality === 'embedding' && (m.dimensions = 256));
+    const adapters = new Map(catalog.providers.map((p) => [p.id, new MockAdapter({ fallback: demoBrain, embedDims: 256 })]));
+    return { fx: await createFeroxes(env, { adapters, catalog, logger: noopLogger, fetch: fakeElevenLabs as typeof fetch }), adapters };
   };
 
-  log('Feroxes demo — real router, budgets, memory, policy gate and audit; mock providers.\n');
+  log('Feroxes demo: the real Core (router, budgets, SQLite, memory, brain, devices, voice, policy, audit) with scripted AI providers and a simulated PC.\n');
+  let { fx } = await boot();
+
   log('1. Memory: the owner asks Feroxes to remember something.');
-  const s1 = await fx.runtime.createSession('cli');
-  // Memory is private, so this conversation can't go to the free-tier Gemini key.
-  await chat(s1.id, "Remember that my sister's name is Leila and she lives in Lyon.");
+  await chat(fx, (await fx.runtime.createSession('cli')).id, "Remember that my sister's name is Leila and she lives in Lyon.");
+  await fx.shutdown();
+  log('\n   … Feroxes is shut down and started again (same database file) …');
+  ({ fx } = await boot());
+  const self = fx.brain.self.get();
+  log(`   Self-model v${self.version}: "${self.identity.name}", start #${self.identity.bootCount}, running since ${new Date(self.identity.firstBootAt).toISOString().slice(0, 10)}.`);
 
-  log('\n2. A new conversation recalls it from long-term memory, with a citation id.');
-  const s2 = await fx.runtime.createSession('cli');
-  await chat(s2.id, 'Where does my sister live?');
+  log('\n2. After the restart, a new conversation still knows, and cites the memory.');
+  const s = (await fx.runtime.createSession('cli')).id;
+  await chat(fx, s, 'Where does my sister live?');
 
-  log('\n3. Failover: Anthropic returns HTTP 429; the request moves to OpenAI without the owner noticing.');
-  adapters.get('anthropic')!.queue('anthropic/claude-sonnet-5.5', { steps: [{ kind: 'error', errorClass: 'rate_limited', status: 429, retryAfterMs: 30_000 }] });
-  await chat(s2.id, 'Sorry, where did you say my sister lives?');
-  const failover = (await fx.ledger.query({})).filter((e) => e.outcome === 'error').at(-1);
-  if (failover) log(`           ledger: ${failover.modelId} → ${failover.errorClass}; model cooling down, next candidate answered`);
-
-  log('\n4. Policy gate: deleting a file is destructive, so it waits for approval.');
-  const r = await chat(s2.id, 'Delete my old notes file.');
-  const [pending] = await fx.approvals.pending();
-  if (r.status === 'waiting_approval' && pending) {
-    log(`           approval card: "${pending.preview.title}" — ${pending.policyReason}`);
-    log('           owner approves.');
+  log('\n3. PC control: the Feroxes desktop app (simulated here) pairs with a one-time code.');
+  const pc = fakeDesktop('Sam-PC');
+  await pc.device.connect(fx.hub, { code: fx.hub.createPairingCode().code });
+  pc.device.heartbeat({ diskFreeGb: 6, cpuPercent: 14, memoryPercent: 48, network: 'ethernet' });
+  log(`   Connected: ${fx.hub.online().map((d) => `${d.name} (${d.platform}, ${d.capabilities.length} capabilities)`).join(', ')}`);
+  let run = await chat(fx, s, 'Write "Buy milk" in Notepad on my PC.');
+  const [approval] = await fx.approvals.pending();
+  if (run.status === 'waiting_approval' && approval) {
+    log(`           approval card: "${approval.preview.title}" — ${approval.policyReason}`);
+    log('           owner taps "Allow for this task".');
     process.stdout.write('  feroxes› ');
     const off = fx.events.subscribe('run.delta', (e) => process.stdout.write(e.payload.text));
-    const resumed = await fx.runtime.resolveApproval(pending.id, { approve: true });
-    await resumed?.done;
+    run = await (await fx.runtime.resolveApproval(approval.id, { approve: true, scope: 'task' }))!.done;
     off();
-    log('');
+    log(`\n           [Notepad now contains: "${pc.state.text}"; commands were Ed25519-signed and verified by the device]`);
   }
 
-  log('\n5. Kill switch: STOP blocks everything until the owner resumes.');
+  log('\n4. "Why did you do that?" — the full trail, rebuilt from stored data.');
+  await chat(fx, s, 'Why did you do that?');
+
+  log('\n5. Voice: push-to-talk → Scribe speech-to-text → agent → Flash text-to-speech, sentence by sentence.');
+  let bytes = 0;
+  let speaking = false;
+  for await (const e of fx.voice!.pushToTalk({ sessionId: s, audio: new Uint8Array(32_000), mime: 'audio/webm', durationMs: 1600 })) {
+    if (e.type === 'transcript') log(`  owner  🎙 "${e.text}"`);
+    if (e.type === 'text') {
+      if (!speaking) process.stdout.write('  feroxes🔊 ');
+      speaking = true;
+      process.stdout.write(e.text);
+    }
+    if (e.type === 'audio') bytes += e.chunk.length;
+  }
+  log(`\n           [${(bytes / 1024).toFixed(1)} KB of audio streamed; speech metered like tokens]`);
+
+  log('\n6. Goals and the morning briefing (the brain runs this at 07:30 by itself).');
+  fx.brain.goals.create({ title: 'Ship the desktop app', horizon: 'month', priority: 1, autonomy: 'suggest' }, 'owner');
+  log(`   ${(await fx.brain.briefing('morning')).replace(/\n/g, '\n   ')}`);
+
+  log('\n7. Kill switch: STOP blocks everything, on the Core and on the paired PC.');
   await fx.system.stop('owner', 'demo');
-  await chat(s2.id, 'Are you there?');
+  await new Promise((r) => setTimeout(r, 5));
+  await chat(fx, s, 'Are you there?');
+  log(`           [PC app received halt: ${pc.device.halted}]`);
   await fx.system.resume('owner', 'demo over');
-  await chat(s2.id, 'Hello again!', 'fast');
 
-  log('\n6. Every call is in the ledger, priced at call time:');
-  for (const row of await fx.ledger.summarize({}, 'modelId')) {
-    log(`   ${row.key.padEnd(42)} ${String(row.calls).padStart(3)} calls  ${String(row.errors).padStart(2)} errors  ${formatUsd(row.cost).padStart(10)}`);
-  }
-  log('\n   Budgets:');
-  for (const b of await fx.budget.status()) log(`   ${b.budget.name.padEnd(20)} ${formatUsd(b.counter.spent).padStart(10)} of ${formatUsd(b.budget.limit)}  (${b.percent.toFixed(3)}%)`);
-
-  const verify = await fx.audit.verify();
-  log(`\n7. Audit log: ${verify.ok ? `${verify.count} entries, hash chain intact (head ${verify.head.slice(0, 12)}…)` : `BROKEN at ${verify.brokenAtSeq}`}`);
-  for (const e of await fx.audit.query({})) log(`   #${e.seq} ${e.action.padEnd(14)} ${e.decision.padEnd(8)} ${e.outcome.padEnd(8)} ${e.summary.slice(0, 70)}`);
-
-  const memories = await fx.memory.store.list({ statuses: ['active'] });
-  log(`\n8. Long-term memory now holds ${memories.length} active item(s):`);
-  for (const m of memories) log(`   [m:${m.id.slice(-8)}] ${m.kind}: ${m.content} (${m.source}, sensitivity ${m.sensitivity})`);
+  log('\n8. Ledger and budgets (every model and voice call, priced at call time):');
+  for (const row of await fx.ledger.summarize({}, 'modelId')) log(`   ${row.key.padEnd(42)} ${String(row.calls).padStart(3)} calls  ${formatUsd(row.cost).padStart(10)}`);
+  for (const b of await fx.budget.status()) log(`   ${b.budget.name.padEnd(20)} ${formatUsd(b.counter.spent).padStart(10)} of ${formatUsd(b.budget.limit)}`);
+  const v = await fx.audit.verify();
+  log(`\n9. Audit log: ${v.ok ? `${v.count} entries, hash chain intact` : `BROKEN at ${v.brokenAtSeq}`}; database: ${join(env.FEROXES_DATA_DIR, 'feroxes.db')}`);
   await fx.shutdown();
   log('\nDemo complete.');
 }
