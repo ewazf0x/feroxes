@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { type ChildProcess, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';
@@ -145,6 +146,42 @@ function feroxesConfigDir(): string {
 }
 
 /**
+ * Runs the PC device agent for the computer the Core is on, as a child tied to the Core's life (its
+ * stdin is the lifeline). On first start it pairs itself with a fresh one-time code passed in the
+ * environment (never on the command line); afterwards it reconnects with its saved token. Device
+ * actions still go through the policy gate and approvals like any other device.
+ */
+function startLocalAgent(fx: Awaited<ReturnType<typeof createFeroxes>>, port: number): { stop(): void } {
+  const entry = [resolve(import.meta.dirname, '../pc-agent/src/cli.js'), resolve(import.meta.dirname, '../../pc-agent/src/cli.ts')].find((p) => existsSync(p));
+  if (!entry) {
+    process.stderr.write('FEROXES_LOCAL_AGENT is on, but the PC agent is not installed next to the Core.\n');
+    return { stop() {} };
+  }
+  let child: ChildProcess | undefined;
+  let stopping = false;
+  let restarts = 0;
+  const launch = () => {
+    child = spawn(process.execPath, ['--no-warnings', entry, 'run', '--core', `ws://127.0.0.1:${port}/devices`], {
+      env: { ...process.env, FEROXES_PAIR_CODE: fx.hub.createPairingCode().code, FEROXES_PARENT_PIPE: '1' },
+      stdio: ['pipe', 'ignore', 'pipe'],
+      windowsHide: true,
+    });
+    child.stderr?.on('data', (d: Buffer) => process.stderr.write(d.toString('utf8').replace(/^(?=.)/gm, '[pc-agent] ')));
+    child.on('exit', (code) => {
+      if (stopping || code === 2) return; // 2 = refused (e.g. the Core's key changed): don't loop
+      if (++restarts <= 5) setTimeout(launch, 5000 * restarts).unref();
+    });
+  };
+  launch();
+  return {
+    stop() {
+      stopping = true;
+      child?.stdin?.end();
+    },
+  };
+}
+
+/**
  * Run the Core as a long-lived local service on 127.0.0.1. The desktop and mobile apps connect to
  * it over the local API. Prints a `FEROXES_READY {json}` line on stdout that the desktop host reads
  * to learn the URL and app token; also writes FEROXES_DATA_DIR/runtime.json so an app can attach to
@@ -185,9 +222,10 @@ async function serve() {
     (d): d is string => !!d && existsSync(join(d, 'index.html')),
   );
 
+  const deviceHosts = env.FEROXES_DEVICE_HOSTS.split(',').map((h) => h.trim()).filter(Boolean);
   let srv: Awaited<ReturnType<typeof startServer>>;
   try {
-    srv = await startServer(fx, { port: env.FEROXES_PORT, token, ...(staticDir ? { staticDir } : {}) });
+    srv = await startServer(fx, { port: env.FEROXES_PORT, token, ...(staticDir ? { staticDir } : {}), ...(deviceHosts.length ? { deviceHosts } : {}) });
   } catch (error) {
     const inUse = (error as NodeJS.ErrnoException).code === 'EADDRINUSE';
     process.stderr.write(inUse ? `Port ${env.FEROXES_PORT} is already in use; another Feroxes Core may be running. Stop it, or set FEROXES_PORT.\n` : `Could not start the local API: ${errorMessage(error)}\n`);
@@ -195,6 +233,7 @@ async function serve() {
     process.exit(1);
   }
   const stopScheduler = fx.brain.scheduler.start();
+  const localAgent = env.FEROXES_LOCAL_AGENT ? startLocalAgent(fx, srv.port) : undefined;
 
   // Write the handshake where apps look for it. The config-dir copy is the rendezvous the desktop
   // app reads to attach to an already-running Core (so it never starts a second one on the same
@@ -216,6 +255,7 @@ async function serve() {
     setTimeout(() => process.exit(0), 3000).unref(); // never hang on a stuck connection
     await Promise.all(runtimeFiles.map((f) => rm(f, { force: true }).catch(() => {}))); // drop handshakes first, so no app attaches to a dying Core
     try {
+      localAgent?.stop();
       stopScheduler();
       await srv.close();
       await fx.shutdown();

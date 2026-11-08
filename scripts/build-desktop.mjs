@@ -68,6 +68,11 @@ try {
 }
 copy(dirname(zodPkg), resolve(coreOut, 'node_modules/zod'));
 
+// Ship the PC device agent with the Core (the Core starts it for this PC when FEROXES_LOCAL_AGENT
+// is set). It resolves @feroxes/protocol and zod from core/node_modules.
+stagePackageJson(resolve(root, 'apps/pc-agent/package.json'), resolve(coreOut, 'pc-agent/package.json'));
+copy(resolve(dist, 'apps/pc-agent/src'), resolve(coreOut, 'pc-agent/src'));
+
 // Ship the UI with the Core: the Core serves it at its own URL, which is what the desktop window
 // loads (one origin for page and API). The shell's bundled copy is only used for the error screen.
 copy(resolve(root, 'apps/desktop/ui/www'), resolve(coreOut, 'www'));

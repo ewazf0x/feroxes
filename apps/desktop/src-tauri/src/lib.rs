@@ -136,6 +136,8 @@ fn spawn_core(app: &tauri::AppHandle) -> Result<Connection, String> {
         .stderr(Stdio::piped())
         .env("FEROXES_DESKTOP", "1")
         .env("FEROXES_PARENT_PIPE", "1")
+        // Start this PC's device agent with the Core and pair it automatically.
+        .env("FEROXES_LOCAL_AGENT", "1")
         .env("NODE_NO_WARNINGS", "1");
     #[cfg(windows)]
     {
