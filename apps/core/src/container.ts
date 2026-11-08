@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { AgentRuntime, type AgentEvents, ContextBuilder, memoryTools } from '@feroxes/agent';
 import { createBrain } from '@feroxes/brain';
+import { ConnectorManager, builtinConnectors } from '@feroxes/connectors';
 import { DeviceHub, type DeviceRecord, type DeviceRegistry, createDeviceTools, deviceToolsets } from '@feroxes/devices';
 import { Catalog, CostEstimator, HealthTracker, ModelRouter, type ProviderAdapter, createAdapter } from '@feroxes/llm';
 import { ConsolidationService, ExtractionService, MemoryService, routerEmbedder } from '@feroxes/memory';
@@ -115,6 +116,10 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   const tools = new ToolRegistry();
   tools.register(timeNow).register(planUpdate(new InMemoryPlanStore())).register(notifyOwner((n) => notify(n))).register(webFetch());
   for (const t of [...fileTools(workspace), ...memoryTools(memory), ...createDeviceTools(hub)]) tools.register(t);
+
+  // ---- integrations: credentials sealed in the vault, every action a policy-gated tool ----
+  const connectors = new ConnectorManager({ connectors: builtinConnectors(), docs: stores.docs, vault: secrets, audit, clock, logger, ...(opts.fetch ? { fetch: opts.fetch } : {}), redirectUri: () => `http://127.0.0.1:${env.FEROXES_PORT}/oauth/callback` });
+  for (const t of connectors.tools()) tools.register(t);
   const toolRuntime = new ToolRuntime({ registry: tools, policy, approvals, audit, system, calls: stores.toolCalls, artifacts: stores.artifacts, timeZone: env.FEROXES_TIMEZONE, clock, logger, notify: (n) => notify({ ...n, urgency: 'low' }) });
 
   // ---- agent + brain ----
@@ -183,7 +188,7 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
     events,
     clock,
     logger,
-    toolsets: () => ['memory', 'time', 'plan', 'notify', 'files', 'web', ...brain.toolsets, ...deviceToolsets(hub)],
+    toolsets: () => ['memory', 'time', 'plan', 'notify', 'files', 'web', ...brain.toolsets, ...deviceToolsets(hub), ...connectors.toolsets()],
     onTurnComplete: ({ sessionId }) => {
       clearTimeout(pendingExtraction.get(sessionId));
       pendingExtraction.set(sessionId, setTimeout(() => void extractNow(sessionId), 2 * MINUTE).unref());
@@ -222,6 +227,15 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   // ---- background daemons ----
   brain.scheduler.add({ name: 'budget.sweep', every: MINUTE, priority: 'none', run: () => budget.sweepExpired() });
   brain.scheduler.add({ name: 'devices.sweep', every: MINUTE, priority: 'none', run: async () => hub.sweep() });
+  brain.scheduler.add({
+    name: 'connectors.health',
+    every: 360 * MINUTE,
+    priority: 'none',
+    run: async () => {
+      for (const c of connectors.connections()) await connectors.check(c.id).catch(() => undefined);
+      return connectors.connections().length;
+    },
+  });
   brain.scheduler.add({
     name: 'spend.anomaly',
     every: 5 * MINUTE,
@@ -277,6 +291,7 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
     brain,
     voice,
     secrets,
+    connectors,
     vaultKeySource,
     dataDir,
     notifications,

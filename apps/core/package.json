@@ -13,6 +13,7 @@
   "dependencies": {
     "@feroxes/agent": "workspace:*",
     "@feroxes/brain": "workspace:*",
+    "@feroxes/connectors": "workspace:*",
     "@feroxes/devices": "workspace:*",
     "@feroxes/llm": "workspace:*",
     "@feroxes/memory": "workspace:*",

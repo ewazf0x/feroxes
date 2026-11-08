@@ -177,6 +177,27 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
   route('POST', '/api/devices/pair', async () => fx.hub.createPairingCode());
   route('DELETE', '/api/devices/:id', async ({ params }) => (await fx.hub.revoke(params.id!), { ok: true }));
 
+  // ---- integrations (no secret ever leaves through these routes) ----
+  const caps = (v: unknown) => (Array.isArray(v) ? v.map(String).slice(0, 50) : undefined);
+  const fields = (v: unknown) => (v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, String(x ?? '').slice(0, 4000)])) : {});
+  route('GET', '/api/connectors', async () => fx.connectors.summaries());
+  route('POST', '/api/connectors/:id/app', async ({ params, body }) => (await fx.connectors.setAppCredentials(params.id!, fields((await body()).fields)), { ok: true }));
+  route('POST', '/api/connectors/:id/connect', async ({ params, body }) => {
+    const b = await body();
+    const c = fx.connectors.connector(params.id!);
+    const chosen = caps(b.capabilities);
+    if (c.auth.kind === 'oauth2') return { authorizeUrl: fx.connectors.beginOAuth(c.id, chosen).authorizeUrl };
+    return { connection: await fx.connectors.connectWithToken(c.id, fields(b.fields), chosen) };
+  });
+  route('POST', '/api/connections/:id/check', async ({ params }) => fx.connectors.check(params.id!));
+  route('POST', '/api/connections/:id/capabilities', async ({ params, body }) => fx.connectors.setCapabilities(params.id!, caps((await body()).capabilities) ?? []));
+  route('DELETE', '/api/connections/:id', async ({ params }) => fx.connectors.disconnect(params.id!));
+  route('GET', '/api/connectors/:id/activity', async ({ params }) => {
+    const id = fx.connectors.connector(params.id!).id;
+    return (await fx.audit.recent({ prefixes: [`connector.${id}.`, `${id}.`], limit: 60 })).reverse().map((e) => ({ seq: e.seq, ts: e.ts, action: e.action, category: e.category, decision: e.decision, outcome: e.outcome, summary: e.summary }));
+  });
+  const offConnectors = fx.connectors.onChange((e) => send('connector', e));
+
   route('GET', '/api/usage', async () => ({ byModel: await fx.ledger.summarize({ from: Date.now() - 30 * DAY }, 'modelId'), budgets: await fx.budget.status(), power: fx.power.mode }));
   route('POST', '/api/system/stop', async ({ body }) => (await fx.system.stop('owner', String((await body()).reason ?? 'app')), summary()));
   route('POST', '/api/system/resume', async () => (await fx.system.resume('owner', 'app'), summary()));
@@ -199,6 +220,20 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
     return STREAMING;
   });
 
+  const oauthCallback = async (res: ServerResponse, url: URL) => {
+    const page = (title: string, msg: string, ok: boolean) => `<!doctype html><meta charset="utf-8"><title>${title}</title><meta name="viewport" content="width=device-width"><body style="font:15px/1.5 system-ui,sans-serif;background:#0a0a0d;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0"><div style="max-width:420px;text-align:center;padding:32px"><div style="font-size:40px">${ok ? '✓' : '✕'}</div><h1 style="font-size:20px;margin:8px 0">${title}</h1><p style="color:#aaa">${msg}</p></div></body>`;
+    const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+    let html: string;
+    try {
+      const conn = await fx.connectors.completeOAuth({ state: url.searchParams.get('state'), code: url.searchParams.get('code'), error: url.searchParams.get('error'), error_description: url.searchParams.get('error_description') });
+      html = page('Connected', `${esc(fx.connectors.connector(conn.connectorId).name)} account <b>${esc(conn.accountName)}</b> is connected to Feroxes. You can close this tab.`, true);
+    } catch (error) {
+      html = page('Not connected', esc(errorMessage(error)), false);
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
+    res.end(html);
+  };
+
   const origins = new Set(opts.allowedOrigins ?? ['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost']);
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -217,6 +252,9 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
         res.writeHead(204, { 'access-control-allow-methods': 'GET,POST,DELETE', 'access-control-allow-headers': 'authorization,content-type', 'access-control-max-age': '600' });
         return void res.end();
       }
+      // OAuth loopback redirect (RFC 8252): a browser navigation can't carry the app token; the
+      // single-use, 10-minute `state` created by beginOAuth is what authorizes this request.
+      if (url.pathname === '/oauth/callback' && req.method === 'GET') return void (await oauthCallback(res, url));
       if (!url.pathname.startsWith('/api/')) return void (await serveStatic(res, url.pathname, opts.staticDir));
 
       const given = Buffer.from((req.headers.authorization ?? '').replace(/^Bearer /, ''));
@@ -285,6 +323,7 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
     offNotify();
     offSystem();
     offMode();
+    offConnectors();
     server.close();
     for (const d of deviceServers) d.server.close();
     throw error;
@@ -300,6 +339,7 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
       offNotify();
       offSystem();
       offMode();
+      offConnectors();
       for (const c of clients) c.end();
       for (const s of deviceSockets) s.destroy();
       await Promise.all([server, ...deviceServers.map((d) => d.server)].map((s) => new Promise<void>((r) => s.close(() => r()))));
