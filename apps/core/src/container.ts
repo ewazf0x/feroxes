@@ -37,9 +37,9 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   const clock = opts.clock ?? systemClock;
   const logger = opts.logger ?? createJsonLogger({ level: 'warn' });
   const resolved = opts.catalog ?? resolveCatalog(env);
-  // The Core still boots with no providers so the app opens on a clean first run and the owner can
-  // add a key (or sign in to Kiro) from Settings. Chat and reasoning fail with a clear message
-  // until at least one provider is configured; memory, goals, devices and the dashboard all work.
+  // The Core still boots with no providers, so the app opens on a clean first run. Chat and
+  // reasoning don't work until at least one provider is configured (API keys in the .env file, or a
+  // Kiro login); memory, goals, devices and the dashboard still work. There is no in-app key entry yet.
   if (resolved.providers.length === 0) {
     logger.warn('No AI provider configured yet. Add a key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, OLLAMA_BASE_URL) or enable Kiro to start thinking.');
   }

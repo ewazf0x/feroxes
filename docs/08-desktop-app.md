@@ -106,9 +106,9 @@ FEROXES_KIRO_BRAIN=true
 FEROXES_KIRO_USE_LOGIN=true   # use an existing `kiro-cli login` session as the main brain
 ```
 
-With no keys at all the app still opens on a clean first run (the dashboard, memory, goals and
-settings work); chat and reasoning report that no provider is configured until you add one. See
-`.env.example` and [07 — Kiro as the brain](07-kiro-brain.md).
+With no keys at all the app still opens (the dashboard, memory, goals and settings work), but chat
+and reasoning don't work until you add a provider. There is no in-app screen for entering keys yet;
+use the `.env` file above. See `.env.example` and [07 — Kiro as the brain](07-kiro-brain.md).
 
 ## Build it
 
