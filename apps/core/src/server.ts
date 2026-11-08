@@ -231,7 +231,21 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
     }
   });
 
-  await new Promise<void>((r) => server.listen(opts.port ?? 0, '127.0.0.1', r));
+  try {
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once('error', rejectListen); // e.g. EADDRINUSE: report it instead of crashing on an unhandled 'error'
+      server.listen(opts.port ?? 0, '127.0.0.1', () => {
+        server.off('error', rejectListen);
+        resolveListen();
+      });
+    });
+  } catch (error) {
+    offEvents();
+    offNotify();
+    offSystem();
+    offMode();
+    throw error;
+  }
   const port = (server.address() as { port: number }).port;
   return {
     server,

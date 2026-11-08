@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { explainRun } from '@feroxes/brain';
-import { createJsonLogger, formatUsd } from '@feroxes/shared';
+import { createJsonLogger, errorMessage, formatUsd } from '@feroxes/shared';
 import { loadEnv } from './config.ts';
 import { createFeroxes } from './container.ts';
 import { runDemo } from './demo.ts';
@@ -170,18 +170,31 @@ async function serve() {
     await writeFile(tokenFile, token, { mode: 0o600 });
   }
 
+  // A closed stdout/stderr pipe (for example, the app that started us quit) must never crash the brain.
+  for (const s of [process.stdout, process.stderr]) s.on('error', () => {});
+
   // Keep stdout clean for the handshake line; send logs to stderr.
   const logger = createJsonLogger({ level: 'warn', write: (l) => process.stderr.write(`${l}\n`) });
   const fx = await createFeroxes(env, { logger });
+
+  // Serve the UI from the Core as well. The desktop window loads it from here, so the page and the
+  // API share one origin (http://127.0.0.1:<port>): no CORS, and no Local Network Access block or
+  // prompt in WebView2/WebKit. It also opens in any browser at the Core URL. Looked up in the
+  // bundled app layout (core/www) and in the repo layout (apps/desktop/ui/www, `pnpm run ui`).
+  const staticDir = [process.env.FEROXES_UI_DIR, resolve(import.meta.dirname, '../www'), resolve(import.meta.dirname, '../../desktop/ui/www')].find(
+    (d): d is string => !!d && existsSync(join(d, 'index.html')),
+  );
+
+  let srv: Awaited<ReturnType<typeof startServer>>;
+  try {
+    srv = await startServer(fx, { port: env.FEROXES_PORT, token, ...(staticDir ? { staticDir } : {}) });
+  } catch (error) {
+    const inUse = (error as NodeJS.ErrnoException).code === 'EADDRINUSE';
+    process.stderr.write(inUse ? `Port ${env.FEROXES_PORT} is already in use; another Feroxes Core may be running. Stop it, or set FEROXES_PORT.\n` : `Could not start the local API: ${errorMessage(error)}\n`);
+    await fx.shutdown();
+    process.exit(1);
+  }
   const stopScheduler = fx.brain.scheduler.start();
-
-  // Also serve the built UI, so Feroxes opens in a browser at the Core URL as well. The desktop app
-  // loads the same files from its own bundle. The assembled dir has index.html, tokens.css,
-  // styles.css and dist/ at its root.
-  const uiWww = resolve(import.meta.dirname, '../../desktop/ui/www');
-  const staticDir = existsSync(join(uiWww, 'index.html')) ? uiWww : undefined;
-
-  const srv = await startServer(fx, { port: env.FEROXES_PORT, token, ...(staticDir ? { staticDir } : {}) });
 
   // Write the handshake where apps look for it. The config-dir copy is the rendezvous the desktop
   // app reads to attach to an already-running Core (so it never starts a second one on the same
@@ -212,6 +225,14 @@ async function serve() {
   };
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
+
+  // When the desktop app starts us, it holds our stdin open. If the app quits or crashes, the pipe
+  // closes and we shut down cleanly instead of running on as an orphan that holds the database.
+  if (process.env.FEROXES_PARENT_PIPE === '1') {
+    process.stdin.on('end', () => void shutdown());
+    process.stdin.on('error', () => void shutdown());
+    process.stdin.resume();
+  }
 }
 
 const [command] = process.argv.slice(2);

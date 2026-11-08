@@ -14,19 +14,24 @@ keeps the app small and the brain identical across surfaces (PC now, Android nex
 ## How it fits together
 
 ```
-┌─ Feroxes.app (Tauri, Rust) ─────────────────────────────┐
-│  WebviewWindow  ──loads──►  ui/www (index.html + JS/CSS) │
-│       ▲  window.__FEROXES__ = { url, token }             │
-│       │                                                  │
-│  setup(): attach-or-spawn                                │
-│       │                                                  │
-│       ├─ attach ─► a Core already running (24/7)         │
-│       └─ spawn  ─► bundled Node + Core (child process)   │
-└───────────────────────────│─────────────────────────────┘
-                            │  HTTP + SSE on 127.0.0.1 (app token)
+┌─ Feroxes.app (Tauri, Rust) ──────────────────────────────┐
+│  setup(): attach-or-spawn                                 │
+│       ├─ attach ─► a Core already running (24/7)          │
+│       └─ spawn  ─► bundled Node + Core (child process)    │
+│                                                           │
+│  WebviewWindow ──loads──► http://127.0.0.1:<port>/        │
+│       window.__FEROXES__ = { url, token }  (init script)  │
+└───────────────────────────│──────────────────────────────┘
+                            │  UI files + API + SSE, one origin (app token on /api)
                             ▼
                    Feroxes Core  ──►  SQLite (one file)
 ```
+
+The window loads the UI **from the Core's own URL**, so the page and the API share one origin
+(`http://127.0.0.1:<port>`). That avoids CORS entirely and avoids the Local Network Access block
+or permission prompt that Chromium-based WebView2 (Edge 143+) applies when a page from another
+origin calls a loopback address. The copy of the UI bundled in the app is used only for the
+"could not start" screen, or if an attached Core has no UI to serve.
 
 - **The Core is a local service.** `feroxes serve` (see `apps/core/src/cli.ts`) starts the HTTP +
   server-sent-events API on `127.0.0.1`, bound to the loopback interface only. Every request carries
@@ -71,15 +76,22 @@ src-tauri/resources/
   core/
     package.json              # exports point at ./src/index.js
     src/*.js                  # apps/core compiled
+    www/                      # the UI, served by the Core at its URL
     node_modules/@feroxes/*   # every workspace package, compiled to .js
     node_modules/zod/         # the one third-party runtime dep
   runtime/
-    node (or node.exe)        # the exact Node 24 used to build (CI adds this)
+    node (or node.exe)        # Node for the target platform, same version as the build (CI adds it)
 ```
 
-The shell runs `runtime/node core/src/cli.js serve`. If `runtime/node` is absent (a dev build), it
-falls back to `node` on `PATH`. **This staged tree is verified to boot and serve the API** (it is how
-the sandbox tested packaging without the Rust layer).
+The shell runs `runtime/node core/src/cli.js serve` with its stdin as a pipe. The Core treats that
+pipe as a lifeline: when the app quits (or crashes) the pipe closes and the Core shuts down
+cleanly, so it never lingers as an orphan holding the database. If `runtime/node` is absent (a dev
+build), the shell falls back to `node` on `PATH`.
+
+**Verified here:** the staged tree boots, writes the handshake, answers the shell's attach check,
+serves the UI and the API on one origin, exits cleanly when its stdin closes, and refuses to start a
+second Core when the port is taken. `node scripts/smoke-desktop.mjs` drives it exactly as the Rust
+shell does; the Desktop workflow runs it on every OS before bundling.
 
 ## Providing API keys / the Kiro brain
 
@@ -141,7 +153,9 @@ Or just `pnpm run desktop:dev` and let the shell spawn its own Core.
 
 - The Core listens on `127.0.0.1` only, never on a routable interface.
 - Every API request needs the app token (persisted at `<data-dir>/app-token`, mode `0600`).
-- The window's content security policy allows connecting only to `127.0.0.1` and loading scripts
-  from the app bundle (`apps/desktop/src-tauri/tauri.conf.json`).
+- The UI pages carry a content security policy from the Core (`script-src 'self'`, connections only
+  to `127.0.0.1`); the bundled error page uses the CSP in `apps/desktop/src-tauri/tauri.conf.json`.
+- Before attaching to a running Core, the shell checks that it accepts the token from the handshake
+  file, so it never attaches to an unrelated process that happens to hold the port.
 - The UI uses no Tauri IPC and no Node integration; it is ordinary web code talking to a local HTTP
   API, so the attack surface is just the Core's authenticated endpoints.

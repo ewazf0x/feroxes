@@ -9,7 +9,8 @@
 // `node` on PATH. Run: node scripts/build-desktop.mjs
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
 import { runTsc } from './build-ui.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -57,9 +58,19 @@ for (const name of readdirSync(resolve(root, 'packages'))) {
   copy(resolve(dist, 'packages', name, 'src'), resolve(dest, 'src'));
 }
 
-const zod = resolve(root, 'node_modules/zod');
-if (!existsSync(zod)) throw new Error('node_modules/zod not found — run `pnpm install` (or link-local with offline deps) first.');
-copy(zod, resolve(coreOut, 'node_modules/zod'));
+// Resolve zod the way the Core does at runtime. Under pnpm it lives in apps/core/node_modules (not
+// at the root), so look it up from apps/core instead of assuming a hoisted layout.
+let zodPkg;
+try {
+  zodPkg = createRequire(resolve(root, 'apps/core/package.json')).resolve('zod/package.json');
+} catch {
+  throw new Error('zod not found from apps/core — run `pnpm install` (or link-local with offline deps) first.');
+}
+copy(dirname(zodPkg), resolve(coreOut, 'node_modules/zod'));
+
+// Ship the UI with the Core: the Core serves it at its own URL, which is what the desktop window
+// loads (one origin for page and API). The shell's bundled copy is only used for the error screen.
+copy(resolve(root, 'apps/desktop/ui/www'), resolve(coreOut, 'www'));
 
 // 4. Make sure the runtime dir exists so the Tauri resource mapping always resolves. CI drops the
 //    platform Node binary (node / node.exe) here for a self-contained installer.
