@@ -1,3 +1,5 @@
+> **Revision 2 (2026-11-08):** hosting, storage, user interface, phase order and the Kiro decision changed. See [06 Revision 2](06-revision-pc-apps-brain.md).
+
 # Feroxes: High-Level Architecture
 
 > Status: draft for review · 2026-11-07

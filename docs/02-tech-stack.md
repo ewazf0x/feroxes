@@ -1,3 +1,5 @@
+> **Revision 2 (2026-11-08):** hosting, storage, user interface, phase order and the Kiro decision changed. See [06 Revision 2](06-revision-pc-apps-brain.md).
+
 # Feroxes: Recommended Tech Stack
 
 > Versions reflect the ecosystem on 2026-11-07. Exact versions are pinned in the lockfile when the repo is scaffolded, and Renovate keeps them current.
