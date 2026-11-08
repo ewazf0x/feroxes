@@ -13,6 +13,7 @@ import { InMemoryPlanStore, ToolRegistry, ToolRuntime, fileTools, notifyOwner, p
 import { AsyncQueue, type ConversationPort, ElevenLabsStt, ElevenLabsTts, VoiceService } from '@feroxes/voice';
 import { ROUTES, resolveCatalog } from './catalog.ts';
 import type { Env } from './config.ts';
+import { SecretStore, loadVault } from './vault.ts';
 
 export interface Notification {
   title: string;
@@ -92,11 +93,17 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   const extraction = new ExtractionService({ router, memory, clock });
   const consolidation = new ConsolidationService({ router, memory, clock });
 
-  // ---- devices: the hub's signing key is persisted, because paired apps pin its public key ----
+  // ---- vault: every credential at rest is sealed (AES-256-GCM); the key lives outside the DB ----
+  const { vault, source: vaultKeySource } = loadVault(process.env, dataDir, { ephemeral: dbPath === ':memory:' });
+  const secrets = new SecretStore(vault, stores.docs);
+
+  // ---- devices: the hub's signing key is persisted (sealed), because paired apps pin its public key ----
   const registry: DeviceRegistry = { put: async (d) => stores.docs.put('device', d), list: async () => stores.docs.list<DeviceRecord>('device') };
-  const savedKey = stores.docs.get<{ id: string; pkcs8: string }>('secret', 'device_signing_key');
-  const hub = new DeviceHub({ registry, system, clock, logger, ...(savedKey ? { signingKeyPkcs8: savedKey.pkcs8 } : {}) });
-  if (!savedKey) stores.docs.put('secret', { id: 'device_signing_key', pkcs8: hub.exportSigningKey() });
+  const legacyKey = stores.docs.get<{ id: string; pkcs8: string }>('secret', 'device_signing_key'); // plaintext, before the vault
+  const savedKey = secrets.get('device_signing_key') ?? legacyKey?.pkcs8;
+  const hub = new DeviceHub({ registry, system, clock, logger, ...(savedKey ? { signingKeyPkcs8: savedKey } : {}) });
+  if (!secrets.has('device_signing_key')) secrets.put('device_signing_key', savedKey ?? hub.exportSigningKey());
+  if (legacyKey) stores.docs.delete('secret', 'device_signing_key');
   await hub.init();
 
   // ---- policy and tools ----
@@ -269,6 +276,9 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
     hub,
     brain,
     voice,
+    secrets,
+    vaultKeySource,
+    dataDir,
     notifications,
     onNotification(cb: (n: Notification) => void) {
       notificationListeners.add(cb);

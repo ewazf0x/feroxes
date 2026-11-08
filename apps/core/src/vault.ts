@@ -1,4 +1,6 @@
 import { argon2, createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Secret vault (architecture §9.6): AES-256-GCM with a versioned master key. Provider keys and
@@ -88,4 +90,86 @@ export async function verifyPassword(password: string, phc: string): Promise<boo
   const expected = Buffer.from(parts[5]!, 'base64url');
   const actual = await argon2Async(password, salt);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+// ---------- master key and sealed-secret storage ----------
+
+/**
+ * Opens the vault. FEROXES_MASTER_KEY wins; otherwise a random key is created once at
+ * <dataDir>/master.key (0600) and reused. In-memory databases (tests, demos) get an ephemeral key,
+ * so nothing is written to disk. The key file lives outside the database, so nightly backups and
+ * copies of feroxes.db contain only ciphertext.
+ */
+export function loadVault(env: NodeJS.ProcessEnv, dataDir: string, opts: { ephemeral?: boolean } = {}): { vault: Vault; source: 'env' | 'file' | 'ephemeral' } {
+  if (env.FEROXES_MASTER_KEY) return { vault: Vault.fromEnv(env), source: 'env' };
+  if (opts.ephemeral) return { vault: new Vault({ 1: Vault.generateKey() }, 1), source: 'ephemeral' };
+  const file = join(dataDir, 'master.key');
+  let key: string;
+  if (existsSync(file)) key = readFileSync(file, 'utf8').trim();
+  else {
+    mkdirSync(dataDir, { recursive: true });
+    key = Vault.generateKey();
+    writeFileSync(file, `${key}\n`, { mode: 0o600, flag: 'wx' }); // never overwrite an existing key
+  }
+  return { vault: new Vault({ 1: key }, 1), source: 'file' };
+}
+
+/** Where sealed secrets are kept: one document per secret, ciphertext only. */
+export interface SecretDocs {
+  put<T extends { id: string }>(kind: string, doc: T, updatedAt?: number): void;
+  get<T>(kind: string, id: string): T | undefined;
+  list<T>(kind: string): T[];
+  delete(kind: string, id: string): void;
+}
+
+export class VaultError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'VaultError';
+  }
+}
+
+/**
+ * Credentials at rest (provider keys, OAuth tokens, bot tokens, the device signing key). Each value
+ * is sealed with AES-256-GCM and bound to its name, so a ciphertext can't be swapped between
+ * records. Values never leave this class except to the code that uses them.
+ */
+export class SecretStore {
+  private static readonly KIND = 'vault';
+  private readonly vault: Vault;
+  private readonly docs: SecretDocs;
+  constructor(vault: Vault, docs: SecretDocs) {
+    this.vault = vault;
+    this.docs = docs;
+  }
+
+  put(name: string, value: string): void {
+    this.docs.put(SecretStore.KIND, { id: name, sealed: this.vault.seal(value, `secret:${name}`) });
+  }
+
+  /** Throws VaultError if the record exists but can't be opened (wrong or lost master key). */
+  get(name: string): string | undefined {
+    const doc = this.docs.get<{ id: string; sealed: SealedSecret }>(SecretStore.KIND, name);
+    if (!doc) return undefined;
+    try {
+      return this.vault.open(doc.sealed, `secret:${name}`);
+    } catch {
+      throw new VaultError(`The vault can't open "${name}" with this master key. Restore the original FEROXES_MASTER_KEY or data/master.key.`);
+    }
+  }
+
+  has(name: string): boolean {
+    return !!this.docs.get(SecretStore.KIND, name);
+  }
+
+  delete(name: string): void {
+    this.docs.delete(SecretStore.KIND, name);
+  }
+
+  /** Deletes every secret whose name starts with `prefix` (e.g. "connector:github:"). */
+  deletePrefix(prefix: string): number {
+    const names = this.docs.list<{ id: string }>(SecretStore.KIND).map((d) => d.id).filter((id) => id.startsWith(prefix));
+    for (const n of names) this.docs.delete(SecretStore.KIND, n);
+    return names.length;
+  }
 }

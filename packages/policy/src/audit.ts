@@ -1,4 +1,4 @@
-import { type Clock, Mutex, canonicalJson, redact, sha256Hex, systemClock } from '@feroxes/shared';
+import { type Clock, Mutex, canonicalJson, redact, scrubSecrets, sha256Hex, systemClock } from '@feroxes/shared';
 import type { RiskCategory } from './permissions.ts';
 
 export type AuditDecision = 'allow' | 'notify' | 'ask' | 'deny' | 'approved' | 'denied' | 'system';
@@ -77,6 +77,7 @@ export class AuditLog {
       const prevHash = last?.hash ?? GENESIS_HASH;
       const base: Omit<AuditEntry, 'hash'> = {
         ...input,
+        summary: scrubSecrets(input.summary), // credentials never land in the (append-only) log
         ...(input.details ? { details: redact(input.details) as Record<string, unknown> } : {}),
         seq: (last?.seq ?? 0) + 1,
         ts: this.clock.now(),
@@ -86,6 +87,12 @@ export class AuditLog {
       await this.store.append(entry);
       return entry;
     });
+  }
+
+  /** Newest-last entries whose action starts with any of `prefixes` (for the integrations view). */
+  async recent(filter: { prefixes: string[]; since?: number; limit?: number }): Promise<AuditEntry[]> {
+    const rows = (await this.store.query({})).filter((e) => filter.prefixes.some((p) => e.action === p || e.action.startsWith(p)) && (filter.since === undefined || e.ts >= filter.since));
+    return rows.slice(-(filter.limit ?? 100));
   }
 
   query(filter: { runId?: string; action?: string; limit?: number }) {
