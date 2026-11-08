@@ -16,7 +16,17 @@ const ReflectionSchema = z.object({
   skills: z.array(z.object({ name: z.string().max(80), trigger: z.string().max(200), steps: z.array(z.string().max(200)).min(2).max(10), tools: z.array(z.string().max(60)).max(10).default([]) })).max(3).default([]),
   goal_suggestions: z.array(z.object({ title: z.string().max(200), horizon: z.enum(['now', 'today', 'week', 'month', 'long']), why: z.string().max(300) })).max(3).default([]),
   improvements: z.array(z.string().max(400)).max(3).default([]),
+  causal: z.array(z.object({ cause: z.string().max(200), effect: z.string().max(200), direction: z.enum(['increases', 'decreases']), domain: z.enum(['work', 'health', 'finance', 'relationships', 'projects', 'home', 'learning', 'devices', 'other']), supports: z.boolean(), evidence: z.string().max(300) })).max(5).default([]),
+  forecasts: z.array(z.object({ statement: z.string().max(300), probability: z.number().min(0.01).max(0.99), days: z.number().min(1).max(365), domain: z.enum(['work', 'health', 'finance', 'relationships', 'projects', 'home', 'learning', 'devices', 'other']) })).max(3).default([]),
+  concepts: z.array(z.object({ name: z.string().max(80), description: z.string().max(600) })).max(2).default([]),
+  thinking_review: z.string().max(800).default(''),
 });
+
+/** Optional sinks for what reflection learns about the world (wired by createBrain). */
+export interface ReflectionSinks {
+  observeCause?: (c: z.infer<typeof ReflectionSchema>['causal'][number]) => void;
+  predict?: (f: z.infer<typeof ReflectionSchema>['forecasts'][number]) => void;
+}
 
 export interface ReflectionLog {
   id: string;
@@ -29,6 +39,8 @@ export interface ReflectionLog {
   skillsProposed: string[];
   goalsProposed: string[];
   improvements: string[];
+  thinkingReview?: string;
+  concepts?: string[];
 }
 
 /** A proposed change to Feroxes's own prompts, tools or workflows: never applied without the owner. */
@@ -46,7 +58,11 @@ const REFLECT_SYSTEM = `You are the reflective part of a personal AI agent. Revi
 - focus: what the agent should focus on next.
 - skills: multi-step workflows that worked and are worth reusing (name, trigger, steps, tools).
 - goal_suggestions: goals the owner might want, only if clearly supported by the day.
-- improvements: changes to the agent's own instructions or tools that would help (they will be shown to the owner, not applied).
+- improvements: changes to the agent's own instructions or tools that would help, including tools it lacked (they will be shown to the owner, not applied).
+- causal: cause-and-effect patterns in the owner's life or systems that the day supports or contradicts.
+- forecasts: concrete, checkable predictions about the coming days or weeks, with honest probabilities.
+- concepts: at most two new frameworks or mental models tailored to this owner, only if genuinely useful.
+- thinking_review: an honest review of the quality of the agent's own reasoning today (using the quality numbers), and one way to think better tomorrow.
 Be specific and honest. Empty lists are fine.`;
 
 /**
@@ -56,8 +72,12 @@ Be specific and honest. Empty lists are fine.`;
 export class ReflectionService {
   private readonly o: { router: ModelRouter; store: AgentStore; docs: DocStore; self: SelfModelService; goals: GoalService; skills: SkillLibrary; clock: Clock };
 
-  constructor(deps: { router: ModelRouter; store: AgentStore; docs: DocStore; self: SelfModelService; goals: GoalService; skills: SkillLibrary; clock?: Clock }) {
-    this.o = { clock: systemClock, ...deps };
+  private readonly sinks: ReflectionSinks;
+
+  constructor(deps: { router: ModelRouter; store: AgentStore; docs: DocStore; self: SelfModelService; goals: GoalService; skills: SkillLibrary; clock?: Clock; sinks?: ReflectionSinks }) {
+    const { sinks, ...rest } = deps;
+    this.o = { clock: systemClock, ...rest };
+    this.sinks = sinks ?? {};
   }
 
   /** Runs, tool calls and outcomes of the last `windowMs`, as a compact journal. */
@@ -81,7 +101,7 @@ export class ReflectionService {
     return { text: lines.join('\n'), runs, stats };
   }
 
-  async reflect(): Promise<ReflectionLog | undefined> {
+  async reflect(extraContext = ''): Promise<ReflectionLog | undefined> {
     const { text, stats } = await this.journal();
     if (stats.runs === 0) return undefined;
     const self = this.o.self.get();
@@ -90,7 +110,7 @@ export class ReflectionService {
       priority: 'deferrable',
       messages: [
         { role: 'system', content: REFLECT_SYSTEM },
-        { role: 'user', content: `Current lessons: ${self.lessons.slice(-8).join(' | ') || 'none'}\nActive skills: ${this.o.skills.list('active').map((s) => s.name).join(', ') || 'none'}\nGoals: ${this.o.goals.list({ status: ['active'] }).map((g) => g.title).join('; ') || 'none'}\n\nJournal (${stats.runs} runs, ${stats.failed} failed, ${stats.denied} denied actions, ${formatUsd(stats.costNanoUsd)}):\n${text.slice(0, 20_000)}` },
+        { role: 'user', content: `Current lessons: ${self.lessons.slice(-8).join(' | ') || 'none'}\nActive skills: ${this.o.skills.list('active').map((s) => s.name).join(', ') || 'none'}\nGoals: ${this.o.goals.list({ status: ['active'] }).map((g) => g.title).join('; ') || 'none'}\n${extraContext ? `${extraContext}\n` : ''}\nJournal (${stats.runs} runs, ${stats.failed} failed, ${stats.denied} denied actions, ${formatUsd(stats.costNanoUsd)}):\n${text.slice(0, 20_000)}` },
       ],
       output: { name: 'reflection', schema: z.toJSONSchema(ReflectionSchema) as Record<string, unknown> },
       sensitivity: 'private',
@@ -109,7 +129,10 @@ export class ReflectionService {
     const goalsProposed = parsed.goal_suggestions.filter((g) => HORIZONS.includes(g.horizon)).map((g) => this.o.goals.create({ title: g.title, horizon: g.horizon, description: g.why }, 'agent').title);
     const now = this.o.clock.now();
     for (const text of parsed.improvements) this.o.docs.put('improvement', { id: uuidv7(now), text, status: 'pending', createdAt: now } satisfies ImprovementProposal);
-    const log: ReflectionLog = { id: uuidv7(now), day: new Date(now).toISOString().slice(0, 10), at: now, summary: parsed.summary, stats, lessons: parsed.lessons, mistakes: parsed.mistakes, skillsProposed, goalsProposed, improvements: parsed.improvements };
+    for (const c of parsed.causal) this.sinks.observeCause?.(c);
+    for (const f of parsed.forecasts) this.sinks.predict?.(f);
+    for (const c of parsed.concepts) this.o.docs.put('concept', { id: uuidv7(now), name: c.name, description: c.description, status: 'proposed', createdAt: now });
+    const log: ReflectionLog = { id: uuidv7(now), day: new Date(now).toISOString().slice(0, 10), at: now, summary: parsed.summary, stats, lessons: parsed.lessons, mistakes: parsed.mistakes, skillsProposed, goalsProposed, improvements: parsed.improvements, ...(parsed.thinking_review ? { thinkingReview: parsed.thinking_review } : {}), concepts: parsed.concepts.map((c) => c.name) };
     this.o.docs.put('reflection', log, now);
     return log;
   }
@@ -134,6 +157,9 @@ export class ReflectionService {
       `Lessons learned: ${[...new Set(logs.flatMap((l) => l.lessons))].slice(-8).join(' | ') || 'none'}`,
       `Skills proposed: ${[...new Set(logs.flatMap((l) => l.skillsProposed))].join(', ') || 'none'}; active now: ${this.o.skills.list('active').map((s) => s.name).join(', ') || 'none'}.`,
       `Mistakes I'm avoiding: ${[...new Set(logs.flatMap((l) => l.mistakes))].slice(-5).join(' | ') || 'none'}`,
+      ...(logs.some((l) => l.thinkingReview) ? [`How my thinking changed: ${logs.filter((l) => l.thinkingReview).slice(-3).map((l) => `${l.day}: ${l.thinkingReview}`).join(' | ')}`] : []),
+      ...(versions.length >= 2 ? [`Self-model: v${versions[0]!.version} → v${versions.at(-1)!.version}; focus now: ${versions.at(-1)!.currentFocus.join(', ') || 'none'}.`] : []),
+      ...(logs.some((l) => l.concepts?.length) ? [`New ideas I proposed for you: ${[...new Set(logs.flatMap((l) => l.concepts ?? []))].join(', ')}`] : []),
       `Waiting for your decision: ${this.improvements().length} improvement idea(s), ${this.o.goals.list({ status: ['proposed'] }).length} goal proposal(s), ${this.o.skills.list('proposed').length} skill(s).`,
     ].join('\n');
   }

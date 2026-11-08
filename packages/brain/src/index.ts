@@ -7,3 +7,6 @@ export * from './situation.ts';
 export * from './reflection.ts';
 export * from './scheduler.ts';
 export * from './brain.ts';
+export * from './foresight.ts';
+export * from './attention.ts';
+export * from './mind.ts';

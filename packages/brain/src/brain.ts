@@ -14,6 +14,9 @@ import { ReflectionService } from './reflection.ts';
 import { type Job, Scheduler } from './scheduler.ts';
 import { SelfModelService } from './self-model.ts';
 import { type Sensor, SituationService, ThreatSensor, activityPattern, deviceSensor, ownerState } from './situation.ts';
+import { type AttentionMode, AttentionManager, ObservationService } from './attention.ts';
+import { CausalModel, DOMAINS, type Domain, ForecastService, HypothesisService, simulate } from './foresight.ts';
+import { MemoryPalace, ResearchColonies, thinkingQuality } from './mind.ts';
 
 export interface BrainDeps {
   docs: DocStore;
@@ -72,7 +75,40 @@ export function createBrain(d: BrainDeps) {
     },
   });
   const situation = new SituationService({ sensors, clock });
-  const reflection = new ReflectionService({ router: d.router, store: d.store, docs: d.docs, self, goals, skills, clock });
+  const forecasts = new ForecastService({ docs: d.docs, clock });
+  const causal = new CausalModel({ docs: d.docs, clock });
+  const hypotheses = new HypothesisService({ docs: d.docs, clock });
+  const observation = new ObservationService({ docs: d.docs, clock });
+  d.hub?.onEvent((e) => observation.observe(e));
+  const attention = new AttentionManager({ docs: d.docs, clock, timeZone: d.timeZone, deliver: (s) => d.notify({ title: s.title, body: s.body, urgency: s.urgency }) });
+  const reflection = new ReflectionService({
+    router: d.router,
+    store: d.store,
+    docs: d.docs,
+    self,
+    goals,
+    skills,
+    clock,
+    sinks: {
+      observeCause: (c) => causal.observe(c),
+      predict: (f) => forecasts.predict({ statement: f.statement, probability: f.probability, resolveInDays: f.days, domain: f.domain, source: 'reflection' }),
+    },
+  });
+  const colonies = new ResearchColonies({ docs: d.docs, runs: { startBackground: (g, o) => d.runtime().startBackground(g, o) }, store: d.store, router: d.router, clock });
+  const palace = new MemoryPalace({ docs: d.docs, memory: d.memory.store, router: d.router, clock });
+
+  /** Reflection with meta-cognition: the day's thinking quality, calibration and observations. */
+  const reflectDeep = async () => {
+    const q = await thinkingQuality(d.store, clock.now() - DAY);
+    const cal = forecasts.calibration();
+    const extra = [
+      `Thinking quality today: ${Math.round(q.successRate * 100)}% of ${q.runs} runs succeeded, ${q.corrections} corrections by the owner, ${q.loopsCaught} loops caught, ${q.denied} denied actions, ${q.toolErrors} tool errors, ${formatUsd(q.costPerSuccessNanoUsd)} per successful run${q.gaps.length ? `; missing capabilities: ${q.gaps.map((g) => `${g.capability} ×${g.count}`).join(', ')}` : ''}.`,
+      cal.resolved ? `Forecast calibration: Brier ${cal.brier} over ${cal.resolved} predictions${cal.bias ? ` (${cal.bias})` : ''}.` : '',
+      observation.summary(1),
+      causal.render(4),
+    ].filter(Boolean).join('\n');
+    return reflection.reflect(extra);
+  };
 
   async function briefing(kind: 'morning' | 'evening' = 'morning'): Promise<string> {
     const now = clock.now();
@@ -83,6 +119,8 @@ export function createBrain(d: BrainDeps) {
       await situation.render(),
       goals.render(8),
       upcoming.length ? `Coming up: ${upcoming.map((m) => `${new Date(m.occurredAt!).toISOString().slice(0, 16).replace('T', ' ')} ${m.content}`).join('; ')}` : '',
+      forecasts.render(),
+      ((held) => (held.length ? `Held back for this briefing (not urgent): ${held.map((s) => s.title).join('; ')}` : ''))(attention.takeDigest()),
       lastReflection ? `Yesterday: ${lastReflection.summary}` : '',
     ].filter(Boolean).join('\n\n');
     try {
@@ -113,20 +151,43 @@ Finish with goals.progress for goal ${goal.id.slice(-6)}.`;
     const msgs = await d.store.messages(run.sessionId);
     const report = [...msgs].reverse().find((m) => m.role === 'assistant' && m.content)?.content ?? run.status;
     goals.progress(goal.id, goals.get(goal.id)!.progress, `[${run.status}] ${report}`, 'agent');
-    d.notify({ title: `${goal.autonomy === 'suggest' ? 'Suggestion' : 'Progress'}: ${goal.title}`, body: report.slice(0, 500), urgency: run.status === 'waiting_approval' ? 'normal' : 'low' });
+    attention.offer({ title: `${goal.autonomy === 'suggest' ? 'Suggestion' : 'Progress'}: ${goal.title}`, body: report.slice(0, 500), urgency: goal.autonomy === 'suggest' || run.status === 'waiting_approval' ? 'normal' : 'low', category: 'goal', relevance: 1 - (goal.priority - 1) / 5 });
     return `goal ${goal.title}: run ${runId.slice(-8)} ${run.status}`;
   }
 
   async function watchSituation(): Promise<string> {
     const fresh = (await situation.newAnomalies()).filter((a) => a.severity !== 'info');
-    for (const a of fresh) d.notify({ title: a.severity === 'critical' ? `⚠ ${a.message}` : a.message, body: a.suggestion ?? '', urgency: a.severity === 'critical' ? 'high' : 'normal' });
+    for (const a of fresh) attention.offer({ title: a.severity === 'critical' ? `⚠ ${a.message}` : a.message, body: a.suggestion ?? '', urgency: a.severity === 'critical' ? 'high' : 'normal', category: a.key.startsWith('phish') ? 'security' : a.key.startsWith('budget') ? 'money' : 'device', relevance: a.severity === 'critical' ? 1 : 0.7 });
     return `${fresh.length} new anomalies`;
   }
 
   const jobs: Job[] = [
     { name: 'situation.watch', every: 5 * 60_000, priority: 'none', run: watchSituation },
     { name: 'goals.pursue', every: 15 * 60_000, priority: 'routine', run: pursueGoals },
-    { name: 'brain.reflect', dailyAt: '03:45', priority: 'deferrable', run: async () => (await reflection.reflect())?.summary ?? 'no activity' },
+    { name: 'brain.reflect', dailyAt: '03:45', priority: 'deferrable', run: async () => (await reflectDeep())?.summary ?? 'no activity' },
+    { name: 'memory.palace', dailyAt: '03:55', priority: 'deferrable', run: async () => (await palace.compress()).join(',') || 'unchanged' },
+    {
+      name: 'research.colonies',
+      every: 10 * 60_000,
+      priority: 'deferrable',
+      run: async () => {
+        const c = colonies.list('running')[0];
+        if (!c) return 'idle';
+        const next = await colonies.step(c.id);
+        if (next.status === 'done') attention.offer({ title: `Research finished: ${next.question}`, body: (next.report ?? '').slice(0, 600), urgency: 'normal', category: 'goal', relevance: 0.8 });
+        return `${next.question}: round ${next.round} ${next.status}`;
+      },
+    },
+    {
+      name: 'forecasts.review',
+      dailyAt: '09:00',
+      priority: 'none',
+      run: async () => {
+        const due = forecasts.due();
+        if (due.length) attention.offer({ title: `${due.length} prediction(s) to check`, body: due.slice(0, 5).map((f) => `"${f.statement}" (${Math.round(f.probability * 100)}%) — did it happen?`).join('\n'), urgency: 'low', category: 'info', relevance: 0.4 });
+        return `${due.length} due`;
+      },
+    },
     {
       name: 'brain.morning_briefing',
       dailyAt: '07:30',
@@ -260,6 +321,137 @@ Finish with goals.progress for goal ${goal.id.slice(-6)}.`;
         return { content: await briefing(kind) };
       },
     }),
+    defineTool({
+      name: 'think.simulate',
+      toolset: 'brain',
+      description: 'Before an important action, simulate several possible futures in parallel (optimistic, likely, pessimistic…), roll each forward, and compare them. Early-warning signals become forecasts that get checked later. Costs a few cents.',
+      input: z.object({ action: z.string().min(10).max(2000), context: z.string().max(5000).optional(), horizonDays: z.number().int().min(1).max(730).default(30), scenarios: z.number().int().min(2).max(6).default(4), domain: z.enum(DOMAINS as [Domain, ...Domain[]]).optional() }),
+      risk: { category: 'read', reversible: true },
+      idempotent: true,
+      timeoutMs: 180_000,
+      async execute(i, ctx) {
+        const r = await simulate(d.router, { action: i.action, ...(i.context ? { context: i.context } : {}), horizonDays: i.horizonDays, scenarios: i.scenarios, values: self.get().values, forecasts, ...(i.domain ? { domain: i.domain } : {}), runId: ctx.runId, signal: ctx.signal });
+        return { content: `${r.synthesis}\n\nScenarios: ${r.scenarios.map((s) => `${s.name} ${Math.round(s.probability * 100)}% (value ${s.rollout?.value ?? '?'})`).join(' | ')}; expected value ${r.expectedValue}. Tracking ${r.forecasts.length} early signal(s) as forecasts. Cost ${formatUsd(r.costNanoUsd)}.`, data: r };
+      },
+    }),
+    defineTool({
+      name: 'forecast.make',
+      toolset: 'brain',
+      description: 'Write down a checkable prediction with an honest probability and a date. Your predictions are scored later, so calibrate.',
+      input: z.object({ statement: z.string().min(5).max(300), probability: z.number().min(0.01).max(0.99), days: z.number().int().min(1).max(730), domain: z.enum(DOMAINS as [Domain, ...Domain[]]).default('other') }),
+      risk: { category: 'internal_write', reversible: true },
+      idempotent: false,
+      async execute(i) {
+        const f = forecasts.predict({ statement: i.statement, probability: i.probability, resolveInDays: i.days, domain: i.domain, source: 'agent' });
+        return { content: `Forecast [f:${f.id.slice(-6)}] recorded: ${Math.round(f.probability * 100)}% by ${new Date(f.resolveBy).toISOString().slice(0, 10)}.` };
+      },
+    }),
+    defineTool({
+      name: 'forecast.resolve',
+      toolset: 'brain',
+      description: 'Record whether a prediction came true, once you know. The owner can correct it.',
+      input: z.object({ id: z.string().min(4).max(40), happened: z.boolean(), note: z.string().max(300).optional() }),
+      risk: { category: 'internal_write', reversible: true },
+      idempotent: false,
+      async execute(i) {
+        const f = forecasts.resolve(i.id, i.happened, 'agent', i.note);
+        const c = forecasts.calibration();
+        return { content: `Resolved "${f.statement}" as ${i.happened ? 'true' : 'false'}. Record: Brier ${c.brier ?? '–'} over ${c.resolved}.` };
+      },
+    }),
+    defineTool({
+      name: 'causal.note',
+      toolset: 'brain',
+      description: "Record evidence about a cause-and-effect pattern in the owner's life or systems (e.g. late coffee → worse sleep). Repeated evidence raises confidence; contrary evidence lowers it.",
+      input: z.object({ cause: z.string().min(3).max(200), effect: z.string().min(3).max(200), direction: z.enum(['increases', 'decreases']).default('increases'), domain: z.enum(DOMAINS as [Domain, ...Domain[]]).default('other'), supports: z.boolean().default(true), evidence: z.string().min(3).max(300) }),
+      risk: { category: 'internal_write', reversible: true },
+      idempotent: false,
+      async execute(i) {
+        const b = causal.observe(i);
+        return { content: `${b.cause} → ${b.direction} → ${b.effect}: confidence now ${Math.round(b.confidence * 100)}% (${b.evidence.length} piece(s) of evidence).` };
+      },
+    }),
+    defineTool({
+      name: 'causal.explain',
+      toolset: 'brain',
+      description: 'Ask the causal world model what tends to cause something, or what something tends to cause, including chains across life domains.',
+      input: z.object({ about: z.string().min(2).max(200) }),
+      risk: { category: 'read', reversible: true },
+      idempotent: true,
+      async execute({ about }) {
+        const causes = causal.causesOf(about);
+        const effects = causal.effectsOf(about);
+        const chains = causal.chains().filter((c) => c.path.some((p) => causal.causesOf(about).includes(p) || causal.effectsOf(about).includes(p)));
+        if (!causes.length && !effects.length) return { content: `Nothing learned yet about "${about}".` };
+        const f = (b: (typeof causes)[number]) => `${b.cause} → ${b.direction} → ${b.effect} (${Math.round(b.confidence * 100)}%)`;
+        return { content: [causes.length ? `Causes: ${causes.map(f).join('; ')}` : '', effects.length ? `Effects: ${effects.map(f).join('; ')}` : '', chains.length ? `Chains: ${chains.map((c) => c.path.map((p) => p.cause).join(' → ') + ` → ${c.path.at(-1)!.effect}`).join('; ')}` : ''].filter(Boolean).join('\n') };
+      },
+    }),
+    defineTool({
+      name: 'hypotheses.track',
+      toolset: 'brain',
+      description: 'Keep several explanations of an unclear situation at once and update them with evidence (Bayes rule), instead of committing to the first guess. action=open needs question + hypotheses; action=update needs board, evidence and likelihoods (h1, h2… → how likely the evidence is if that hypothesis were true); action=close needs board + conclusion.',
+      input: z.object({ action: z.enum(['open', 'update', 'close']), question: z.string().max(400).optional(), hypotheses: z.array(z.string().max(300)).min(2).max(6).optional(), board: z.string().max(40).optional(), evidence: z.string().max(400).optional(), likelihoods: z.record(z.string(), z.number().min(0).max(1)).optional(), conclusion: z.string().max(400).optional() }),
+      risk: { category: 'internal_write', reversible: true },
+      idempotent: false,
+      async execute(i) {
+        const show = (b: ReturnType<HypothesisService['get']>) => `[hb:${b.id.slice(-6)}] ${b.question}\n${[...b.hypotheses].sort((x, y) => y.probability - x.probability).map((h) => `${h.id} ${Math.round(h.probability * 100)}% ${h.text}`).join('\n')}`;
+        if (i.action === 'open') return { content: show(hypotheses.open(i.question ?? 'What is going on?', i.hypotheses ?? [])) };
+        if (!i.board) return { content: 'Which board? Give board.', isError: true };
+        if (i.action === 'update') return { content: show(hypotheses.update(i.board, i.evidence ?? '', i.likelihoods ?? {})) };
+        return { content: `Closed: ${hypotheses.close(i.board, i.conclusion ?? '').conclusion}` };
+      },
+    }),
+    defineTool({
+      name: 'research.start',
+      toolset: 'brain',
+      description: 'Start a research team (scout, analyst, skeptic, synthesizer by default) that works on a question in rounds in the background, for minutes to days, within a budget, and reports back.',
+      input: z.object({ question: z.string().min(10).max(1000), roles: z.array(z.string().max(40)).max(6).optional(), rounds: z.number().int().min(1).max(12).default(4), budgetUsd: z.number().min(0.05).max(1).default(0.5) }),
+      risk: { category: 'internal_write', reversible: true },
+      idempotent: false,
+      async execute(i) {
+        const c = colonies.start(i.question, { ...(i.roles ? { roles: i.roles } : {}), maxRounds: i.rounds, budgetUsd: i.budgetUsd });
+        return { content: `Research team [rc:${c.id.slice(-6)}] started: ${c.roles.join(', ')}, up to ${c.maxRounds} rounds, budget ${formatUsd(c.budgetNanoUsd)}. It runs in the background (background budget applies) and reports when done.` };
+      },
+    }),
+    defineTool({
+      name: 'research.status',
+      toolset: 'brain',
+      description: 'Status, notebook highlights or the final report of a research team.',
+      input: z.object({ id: z.string().max(40).optional() }),
+      risk: { category: 'read', reversible: true },
+      idempotent: true,
+      async execute({ id }) {
+        const c = id ? colonies.get(id) : colonies.list().at(-1);
+        if (!c) return { content: 'No research teams yet.' };
+        return { content: c.report ? `Report for "${c.question}":\n${c.report}` : `"${c.question}": ${c.status}, round ${c.round}/${c.maxRounds}, ${formatUsd(c.spentNanoUsd)} spent.\n${c.notebook.slice(-4).map((n) => `[${n.role}] ${n.text.slice(0, 300)}`).join('\n')}` };
+      },
+    }),
+    defineTool({
+      name: 'attention.mode',
+      toolset: 'brain',
+      description: 'Change how often you may interrupt the owner: ambient (default, only what matters), focus (almost nothing), silent (observe and learn, no interruptions except security and money), proactive (more suggestions). Use when the owner asks.',
+      input: z.object({ mode: z.enum(['ambient', 'focus', 'silent', 'proactive']) }),
+      risk: { category: 'internal_write', reversible: true },
+      idempotent: true,
+      async execute({ mode }) {
+        attention.setMode(mode as AttentionMode);
+        return { content: `Attention mode: ${mode}.` };
+      },
+    }),
+    defineTool({
+      name: 'self.quality',
+      toolset: 'brain',
+      description: 'Look at the measured quality of your own thinking: success rate, corrections, loops, denied actions, cost per success, missing capabilities, forecast calibration.',
+      input: z.object({ days: z.number().int().min(1).max(90).default(7) }),
+      risk: { category: 'read', reversible: true },
+      idempotent: true,
+      async execute({ days }) {
+        const q = await thinkingQuality(d.store, clock.now() - days * DAY);
+        const c = forecasts.calibration();
+        return { content: `Last ${days} day(s): ${q.runs} runs, ${Math.round(q.successRate * 100)}% succeeded, ${q.corrections} corrections, ${q.loopsCaught} loops caught, ${q.denied} denied, ${q.toolErrors} tool errors, ${formatUsd(q.costPerSuccessNanoUsd)} per success.${q.gaps.length ? ` Capability gaps: ${q.gaps.map((g) => `${g.capability} ×${g.count}`).join(', ')}.` : ''} Forecasts: ${c.resolved ? `Brier ${c.brier} over ${c.resolved}${c.bias ? `, ${c.bias}` : ''}` : 'none resolved yet'}.` };
+      },
+    }),
   ].map((t) => t as unknown as AnyTool);
 
   return {
@@ -275,7 +467,7 @@ Finish with goals.progress for goal ${goal.id.slice(-6)}.`;
     pursueGoals,
     watchSituation,
     /** Rarely-changing context: goes into the cached system prompt. */
-    stableContext: async () => [self.render(), goals.render(), skills.render()].filter(Boolean),
+    stableContext: async () => [self.render(), goals.render(), skills.render(), causal.render(), forecasts.render(), palace.render()].filter(Boolean),
     /** Per-turn context: situation and owner state, sent with the latest message. */
     turnContext: async (_query: string, sessionId: string) => {
       const recent = await d.store.messages(sessionId);
@@ -286,8 +478,19 @@ Finish with goals.progress for goal ${goal.id.slice(-6)}.`;
         await situation.render(),
         state.guidance ? `<owner_state>${state.guidance}</owner_state>` : '',
         pattern.quietHours.includes(hour) ? '<owner_state>This is usually a quiet hour for the owner.</owner_state>' : '',
+        attention.currentMode !== 'ambient' ? `<owner_state>Attention mode: ${attention.currentMode}.</owner_state>` : '',
+        hypotheses.render(),
+        colonies.render(),
       ].filter(Boolean);
     },
+    forecasts,
+    causal,
+    hypotheses,
+    observation,
+    attention,
+    colonies,
+    palace,
+    reflectDeep,
     toolsets: ['brain'],
     horizons: HORIZONS,
   };
