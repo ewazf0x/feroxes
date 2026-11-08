@@ -2,12 +2,14 @@ import type { ProviderAdapter, ProviderEntry } from '../types.ts';
 import { AnthropicAdapter } from './anthropic.ts';
 import { GoogleAdapter } from './google.ts';
 import type { FetchLike } from './http.ts';
+import { KiroAdapter } from './kiro.ts';
 import { MockAdapter } from './mock.ts';
 import { OpenAiCompatibleAdapter } from './openai-compatible.ts';
 
 export { AnthropicAdapter, toAnthropic } from './anthropic.ts';
 export { GoogleAdapter, toGemini, toGeminiSchema } from './google.ts';
 export { OpenAiCompatibleAdapter, toOpenAiMessages } from './openai-compatible.ts';
+export { KiroAdapter, renderPrompt, parseToolCall, classifyKiroFailure, TOOL_SENTINEL } from './kiro.ts';
 export { parseSse, type FetchLike } from './http.ts';
 
 /** Builds the adapter for one configured provider. The key comes from the vault. */
@@ -29,6 +31,10 @@ export function createAdapter(provider: ProviderEntry, apiKey: string | undefine
         ...(provider.headers ? { headers: provider.headers } : {}),
         ...f,
       });
+    case 'kiro': {
+      const s = (provider.settings ?? {}) as { command?: string; extraArgs?: string[]; cwd?: string };
+      return new KiroAdapter({ ...(apiKey ? { apiKey } : {}), ...(s.command ? { command: s.command } : {}), ...(s.extraArgs ? { extraArgs: s.extraArgs } : {}), ...(s.cwd ? { cwd: s.cwd } : {}) });
+    }
     case 'mock':
       return new MockAdapter();
   }

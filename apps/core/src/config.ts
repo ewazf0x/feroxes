@@ -29,6 +29,22 @@ export const EnvSchema = z.object({
   ELEVENLABS_STT_MODEL: z.string().default('scribe_v2'),
   /** Port the apps connect to (device WebSocket + API, next milestone). */
   FEROXES_PORT: z.coerce.number().int().default(7311),
+
+  // --- Kiro as the main brain (owner's explicit choice; see docs/07) ---
+  /** Kiro is the default reasoning engine when on and reachable; API models are the fallback. */
+  FEROXES_KIRO_BRAIN: z.stringbool().default(true),
+  /** 'reasoning' = Kiro for chat, planning, decisions, reflection (fast utility stays on cheap APIs);
+   *  'all' = also route fast-tier utility through Kiro (slower, heavier on Kiro credits). */
+  FEROXES_KIRO_SCOPE: z.enum(['reasoning', 'all']).default('reasoning'),
+  /** Use an existing `kiro-cli login` session when no API key is set. */
+  FEROXES_KIRO_USE_LOGIN: z.stringbool().default(false),
+  KIRO_API_KEY: z.string().optional(),
+  KIRO_CLI_COMMAND: z.string().default('kiro-cli'),
+  /** Optional Kiro custom agent (e.g. one with tools disabled, so Kiro only reasons). */
+  KIRO_CLI_AGENT: z.string().optional(),
+  /** Pin specific Kiro models, or leave blank to let Kiro's agent choose. */
+  KIRO_FRONTIER_MODEL: z.string().optional(),
+  KIRO_BALANCED_MODEL: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

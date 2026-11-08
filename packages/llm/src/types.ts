@@ -37,7 +37,7 @@ export interface ToolSpec {
 
 // ---------- Catalog ----------
 
-export type ProviderKind = 'openai' | 'anthropic' | 'google' | 'openai-compatible' | 'mock';
+export type ProviderKind = 'openai' | 'anthropic' | 'google' | 'openai-compatible' | 'kiro' | 'mock';
 
 export type Capability = 'tools' | 'vision' | 'json_schema' | 'streaming' | 'reasoning' | 'prompt_cache' | 'computer_use';
 
@@ -51,6 +51,8 @@ export interface ProviderEntry {
   maxSensitivity: Sensitivity;
   timeouts?: { firstTokenMs?: number; totalMs?: number };
   headers?: Record<string, string>;
+  /** Provider-specific settings, e.g. Kiro CLI: { command, extraArgs, cwd }. */
+  settings?: Record<string, unknown>;
 }
 
 export interface ModelEntry {

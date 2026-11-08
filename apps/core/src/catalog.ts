@@ -50,6 +50,10 @@ const TIER_ORDER: Record<Tier, string[]> = {
   local: ['ollama-pc/local'],
 };
 
+/** Kiro, through Kiro CLI, has no HTTP endpoint, no token metering (subscription credits) and no
+ * image path; it declares tools/json via Feroxes's text protocol and reasoning, but not vision. */
+const KIRO_CAPS: Capability[] = ['tools', 'streaming', 'json_schema', 'reasoning'];
+
 export const ROUTES: RouteConfig[] = [
   { id: 'chat.turn', tier: 'auto', requiredCapabilities: ['streaming'], defaultPriority: 'interactive', allowEscalation: false },
   { id: 'agent.plan', tier: 'frontier', requiredCapabilities: [], defaultPriority: 'interactive', allowEscalation: false },
@@ -69,6 +73,7 @@ export interface ResolvedCatalog {
   providers: ProviderEntry[];
   models: ModelEntry[];
   tiers: Partial<Record<Tier, string[]>>;
+  routes: RouteConfig[];
   prices: ModelPrice[];
   keys: Map<string, string>;
 }
@@ -87,6 +92,15 @@ export function resolveCatalog(env: Env): ResolvedCatalog {
   if (env.OPENROUTER_API_KEY) add({ id: 'openrouter', kind: 'openai-compatible', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', headers: { 'X-Title': 'Feroxes' }, enabled: true, maxSensitivity: 'private' }, env.OPENROUTER_API_KEY);
   if (env.OLLAMA_BASE_URL) add({ id: 'ollama-pc', kind: 'openai-compatible', name: 'Ollama on the owner\'s PC', baseUrl: env.OLLAMA_BASE_URL, enabled: true, maxSensitivity: 'secret', timeouts: { firstTokenMs: 60_000, totalMs: 300_000 } });
 
+  // Kiro as the main brain (owner's explicit choice). Driven through Kiro CLI on the PC; see
+  // docs/07. Enabled when an API key is set, or when FEROXES_KIRO_BRAIN=true (an existing
+  // `kiro-cli login` session is used if no key is given).
+  const kiroOn = env.FEROXES_KIRO_BRAIN && (!!env.KIRO_API_KEY || env.FEROXES_KIRO_USE_LOGIN);
+  if (kiroOn) {
+    const settings = { command: env.KIRO_CLI_COMMAND, ...(env.KIRO_CLI_AGENT ? { extraArgs: ['--agent', env.KIRO_CLI_AGENT] } : {}) };
+    add({ id: 'kiro', kind: 'kiro', name: 'Kiro (main brain)', enabled: true, maxSensitivity: 'private', settings, timeouts: { firstTokenMs: 120_000, totalMs: 600_000 } }, env.KIRO_API_KEY);
+  }
+
   const enabled = new Set(providers.map((p) => p.id));
   const models: ModelEntry[] = SEEDS.filter((s) => enabled.has(s.providerId)).map((s) => ({
     id: s.id,
@@ -104,8 +118,23 @@ export function resolveCatalog(env: Env): ResolvedCatalog {
   if (enabled.has('ollama-pc')) {
     models.push({ id: 'ollama-pc/local', providerId: 'ollama-pc', modelKey: env.OLLAMA_MODEL, displayName: `Ollama ${env.OLLAMA_MODEL}`, modality: 'chat', capabilities: ['tools', 'streaming', 'json_schema'], contextWindow: 32_000, maxOutputTokens: 4_096, tier: 'local', enabled: true });
   }
+  if (kiroOn) {
+    // One Kiro model per reasoning tier. modelKey 'default' lets Kiro's agent choose; set
+    // KIRO_FRONTIER_MODEL / KIRO_BALANCED_MODEL to pin specific Kiro models.
+    models.push({ id: 'kiro/frontier', providerId: 'kiro', modelKey: env.KIRO_FRONTIER_MODEL || 'default', displayName: 'Kiro (frontier)', modality: 'chat', capabilities: KIRO_CAPS, contextWindow: 200_000, maxOutputTokens: 32_000, tier: 'frontier', enabled: true });
+    models.push({ id: 'kiro/balanced', providerId: 'kiro', modelKey: env.KIRO_BALANCED_MODEL || 'default', displayName: 'Kiro (balanced)', modality: 'chat', capabilities: KIRO_CAPS, contextWindow: 200_000, maxOutputTokens: 16_000, tier: 'balanced', enabled: true });
+    if (env.FEROXES_KIRO_SCOPE === 'all') models.push({ id: 'kiro/fast', providerId: 'kiro', modelKey: env.KIRO_BALANCED_MODEL || 'default', displayName: 'Kiro (fast)', modality: 'chat', capabilities: KIRO_CAPS, contextWindow: 200_000, maxOutputTokens: 8_000, tier: 'fast', enabled: true });
+  }
+
   const ids = new Set(models.map((m) => m.id));
   const tiers = Object.fromEntries(Object.entries(TIER_ORDER).map(([tier, list]) => [tier, list.filter((id) => ids.has(id))])) as Partial<Record<Tier, string[]>>;
+  // Kiro is the default and main brain: it goes first in every tier it serves, so the router
+  // always tries it before the API models, which become fallback (owner's explicit choice).
+  if (kiroOn) {
+    tiers.frontier = ['kiro/frontier', ...(tiers.frontier ?? [])];
+    tiers.balanced = ['kiro/balanced', ...(tiers.balanced ?? [])];
+    if (env.FEROXES_KIRO_SCOPE === 'all') tiers.fast = ['kiro/fast', ...(tiers.fast ?? [])];
+  }
   const prices: ModelPrice[] = SEEDS.filter((s) => ids.has(s.id)).map((s) => ({
     id: `seed-${s.id}`,
     modelId: s.id,
@@ -115,5 +144,13 @@ export function resolveCatalog(env: Env): ResolvedCatalog {
     ...(s.price[2] !== undefined ? { cachedInputPerMTok: s.price[2] } : {}),
   }));
   if (ids.has('ollama-pc/local')) prices.push({ id: 'seed-ollama', modelId: 'ollama-pc/local', effectiveFrom: 0, inputPerMTok: 0, outputPerMTok: 0 });
-  return { providers, models, tiers, prices, keys };
+  // Kiro usage is billed as subscription credits, not per token: $0 in the token ledger. The
+  // dashboard shows Kiro call counts; credits are tracked in Kiro's own /usage.
+  for (const id of ['kiro/frontier', 'kiro/balanced', 'kiro/fast']) if (ids.has(id)) prices.push({ id: `seed-${id}`, modelId: id, effectiveFrom: 0, inputPerMTok: 0, outputPerMTok: 0 });
+
+  // With Kiro as the brain and the default "reasoning" scope, conversation must still reach Kiro:
+  // floor chat.turn at the balanced tier (where Kiro sits) instead of letting trivial turns drop
+  // to the fast/API tier. With scope "all", Kiro is in the fast tier too, so keep auto.
+  const routes = ROUTES.map((r) => (r.id === 'chat.turn' && kiroOn && env.FEROXES_KIRO_SCOPE !== 'all' ? { ...r, tier: 'balanced' as Tier } : r));
+  return { providers, models, tiers, routes, prices, keys };
 }

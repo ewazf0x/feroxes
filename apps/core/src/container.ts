@@ -48,7 +48,7 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   ];
   const stores = openStores(dbPath, budgets);
 
-  const catalog = new Catalog({ providers: resolved.providers, models: resolved.models, tiers: resolved.tiers, routes: ROUTES });
+  const catalog = new Catalog({ providers: resolved.providers, models: resolved.models, tiers: resolved.tiers, routes: resolved.routes });
   const adapters = opts.adapters ?? new Map(resolved.providers.map((p) => [p.id, createAdapter(p, resolved.keys.get(p.id))]));
 
   const notifications: Notification[] = [];

@@ -30,6 +30,24 @@ test('owner password: argon2id hash verifies, wrong password fails, short passwo
   await assert.rejects(hashPassword('short'), /12 characters/);
 });
 
+test('kiro is the main brain: first in the reasoning tiers, API models fall back, utility stays cheap', () => {
+  const c = resolveCatalog(loadEnv({ ANTHROPIC_API_KEY: 'a', OPENAI_API_KEY: 'o', KIRO_API_KEY: 'kiro-key' }));
+  assert.ok(c.providers.some((p) => p.id === 'kiro' && p.kind === 'kiro'));
+  assert.equal(c.tiers.frontier?.[0], 'kiro/frontier', 'Kiro tried first at frontier');
+  assert.equal(c.tiers.balanced?.[0], 'kiro/balanced', 'Kiro tried first at balanced');
+  assert.ok(c.tiers.frontier?.includes('anthropic/claude-opus-5.5'), 'API models remain as fallback');
+  assert.ok(!c.tiers.fast?.some((m) => m.startsWith('kiro/')), 'fast utility tier stays on cheap APIs by default');
+  assert.equal(c.routes.find((r) => r.id === 'chat.turn')?.tier, 'balanced', 'conversation is floored to the Kiro tier');
+  assert.ok(c.prices.some((p) => p.modelId === 'kiro/balanced' && p.inputPerMTok === 0), 'Kiro billed as credits, $0 in the token ledger');
+  // Scope "all" also puts Kiro in the fast tier.
+  const all = resolveCatalog(loadEnv({ ANTHROPIC_API_KEY: 'a', KIRO_API_KEY: 'k', FEROXES_KIRO_SCOPE: 'all' }));
+  assert.equal(all.tiers.fast?.[0], 'kiro/fast');
+  // Turned off when no key and login not allowed.
+  assert.ok(!resolveCatalog(loadEnv({ ANTHROPIC_API_KEY: 'a' })).providers.some((p) => p.id === 'kiro'));
+  // An existing kiro-cli login can enable it without a key.
+  assert.ok(resolveCatalog(loadEnv({ ANTHROPIC_API_KEY: 'a', FEROXES_KIRO_USE_LOGIN: 'true' })).providers.some((p) => p.id === 'kiro'));
+});
+
 test('catalog: only providers with keys are enabled; free-tier Gemini may not receive private data', () => {
   const env = loadEnv({ ANTHROPIC_API_KEY: 'a', GEMINI_API_KEY: 'g', OPENROUTER_API_KEY: 'o' });
   const c = resolveCatalog(env);
