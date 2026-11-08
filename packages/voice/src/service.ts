@@ -91,25 +91,26 @@ export class VoiceService {
     let spoken = 0;
     let previous = '';
     let speak = input.speak !== false && !!this.tts;
-    for await (const delta of deltas) {
-      yield { type: 'text', text: delta };
-      if (!speak) continue;
-      for (const sentence of chunker.push(delta)) {
-        try {
-          yield* this.say(sentence, input, ++spoken, previous);
-          previous = sentence;
-        } catch (error) {
-          speak = false;
-          yield { type: 'notice', message: error instanceof VoiceBudgetError ? `${error.message} Answering in text only.` : 'Speech failed; answering in text only.' };
-        }
+    // Speech failures (budget, network) degrade to text instead of failing the turn.
+    const self = this;
+    async function* trySay(text: string): AsyncGenerator<VoiceEvent> {
+      if (!speak) return;
+      try {
+        yield* self.say(text, input, ++spoken, previous);
+        previous = text;
+      } catch (error) {
+        speak = false;
+        yield { type: 'notice', message: error instanceof VoiceBudgetError ? `${error.message} Answering in text only.` : 'Speech failed; answering in text only.' };
       }
     }
-    const result = await done;
-    if (speak) {
-      const rest = chunker.flush();
-      if (rest) yield* this.say(rest, input, ++spoken, previous);
-      if (result.status === 'waiting_approval') yield* this.say(`I need your approval first${result.approvalTitle ? `: ${result.approvalTitle}` : ''}. It's in the app.`, input, ++spoken);
+    for await (const delta of deltas) {
+      yield { type: 'text', text: delta };
+      for (const sentence of speak ? chunker.push(delta) : []) yield* trySay(sentence);
     }
+    const result = await done;
+    const rest = chunker.flush();
+    if (rest) yield* trySay(rest);
+    if (result.status === 'waiting_approval') yield* trySay(`I need your approval first${result.approvalTitle ? `: ${result.approvalTitle}` : ''}. It's in the app.`);
     yield { type: 'done', runId, status: result.status };
   }
 
