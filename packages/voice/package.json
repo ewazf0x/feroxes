@@ -1,0 +1,14 @@
+{
+  "name": "@feroxes/voice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Voice: speech-to-text and text-to-speech adapters (ElevenLabs), metering, sentence streaming, push-to-talk turns, voice kill switch.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/metering": "workspace:*",
+    "@feroxes/shared": "workspace:*"
+  }
+}
