@@ -8,3 +8,8 @@ coverage/
 backups/
 workspace/
 .DS_Store
+data/
+*.db
+*.db-wal
+*.db-shm
+app-token
