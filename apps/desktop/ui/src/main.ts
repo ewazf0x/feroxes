@@ -1,4 +1,4 @@
-import { api } from './api.ts';
+import { api, localStore } from './api.ts';
 import { chatScreen } from './chat.ts';
 import { type Signal, h, list, signal, transition } from './core.ts';
 import { icon } from './icons.ts';
@@ -99,7 +99,7 @@ function palette(): Node {
 
 function boot(): void {
   const root = document.getElementById('app')!;
-  const saved = localStorage.getItem('feroxes-theme');
+  const saved = localStore.getItem('feroxes-theme');
   if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
   connect();
 

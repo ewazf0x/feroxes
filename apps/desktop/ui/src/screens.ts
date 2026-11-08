@@ -1,4 +1,4 @@
-import { api } from './api.ts';
+import { api, localStore } from './api.ts';
 import { type Signal, append, h, signal, timeAgo, usd } from './core.ts';
 import { icon } from './icons.ts';
 import { navigate, on, toast } from './store.ts';
@@ -163,7 +163,7 @@ export function settingsScreen(): Node {
 export function setTheme(t: 'dark' | 'light' | 'system'): void {
   if (t === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
-  localStorage.setItem('feroxes-theme', t);
+  localStore.setItem('feroxes-theme', t);
 }
 
 export type { Signal };

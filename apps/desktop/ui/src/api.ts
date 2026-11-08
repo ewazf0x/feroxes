@@ -11,18 +11,35 @@ declare global {
   }
 }
 
+/** sessionStorage/localStorage throw in opaque origins (previews); never let that crash the app. */
+function safeStore(kind: 'session' | 'local'): Pick<Storage, 'getItem' | 'setItem'> {
+  try {
+    const s = kind === 'session' ? sessionStorage : localStorage;
+    s.getItem('__probe__');
+    return s;
+  } catch {
+    const mem = new Map<string, string>();
+    return { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v) };
+  }
+}
+export const sessionStore = safeStore('session');
+export const localStore = safeStore('local');
+
 function connection(): { url: string; token: string } {
   if (window.__FEROXES__) return window.__FEROXES__;
   const fromHash = new URLSearchParams(location.hash.slice(1)).get('token');
   if (fromHash) {
-    sessionStorage.setItem('feroxes-token', fromHash);
+    sessionStore.setItem('feroxes-token', fromHash);
     history.replaceState(null, '', location.pathname + location.search);
   }
-  return { url: location.origin, token: sessionStorage.getItem('feroxes-token') ?? '' };
+  return { url: location.origin, token: sessionStore.getItem('feroxes-token') ?? '' };
 }
 
 const conn = connection();
 export const online = signal<'connecting' | 'online' | 'offline'>('connecting');
+
+/** Demo/preview mode: ?demo=1 serves canned data so the UI runs with no Core (screenshots, first run). */
+export const DEMO = new URLSearchParams(location.search).has('demo');
 
 export class ApiError extends Error {
   readonly status: number;
@@ -33,6 +50,10 @@ export class ApiError extends Error {
 }
 
 export async function api<T = unknown>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  if (DEMO) {
+    const { demoResponse } = await import('./fixtures.ts');
+    return demoResponse(path, init) as Promise<T>;
+  }
   const res = await fetch(`${conn.url}/api${path}`, {
     method: init.method ?? (init.body ? 'POST' : 'GET'),
     headers: { authorization: `Bearer ${conn.token}`, ...(init.body ? { 'content-type': 'application/json' } : {}) },
@@ -50,6 +71,11 @@ export type CoreEvent = { event: string; data: any };
  * backoff and reports connection state for the UI.
  */
 export function subscribe(onEvent: (e: CoreEvent) => void): () => void {
+  if (DEMO) {
+    online.set('online');
+    void onEvent;
+    return () => {};
+  }
   let stopped = false;
   let controller: AbortController | undefined;
   let attempt = 0;
