@@ -13,3 +13,5 @@ data/
 *.db-wal
 *.db-shm
 app-token
+apps/desktop/ui/dist/
+apps/desktop/ui/public/tokens.css
