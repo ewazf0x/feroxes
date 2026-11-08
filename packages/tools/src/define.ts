@@ -9,6 +9,8 @@ export interface ToolResult<O = unknown> {
   isError?: boolean;
   /** Untrusted sources this result introduces (web pages, emails …). */
   taint?: TaintSource[];
+  /** Images for vision models (screenshots). Sent to the model, never to the audit log. */
+  images?: { mediaType: string; dataBase64: string }[];
 }
 
 export interface ToolContext {

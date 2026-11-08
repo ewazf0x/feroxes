@@ -1,0 +1,16 @@
+{
+  "name": "@feroxes/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Wire contracts between the Core and the Feroxes apps (desktop, Android). Exported as JSON Schema for Rust and Kotlin code generation.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "schema": "node src/export-schema.ts > device-protocol.schema.json"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  }
+}

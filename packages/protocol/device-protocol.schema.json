@@ -1,0 +1,1215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Feroxes device protocol v1",
+  "$defs": {
+    "DeviceToCore": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "pair"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "code": {
+              "type": "string",
+              "minLength": 6,
+              "maxLength": 20
+            },
+            "device": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "windows",
+                    "macos",
+                    "linux",
+                    "android"
+                  ]
+                },
+                "appVersion": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "capabilities": {
+                  "maxItems": 40,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "screen.capture",
+                      "ui.tree",
+                      "ui.act",
+                      "input.pointer",
+                      "input.keyboard",
+                      "gesture",
+                      "global.action",
+                      "apps.list",
+                      "apps.launch",
+                      "windows.list",
+                      "windows.focus",
+                      "clipboard",
+                      "fs",
+                      "shell",
+                      "notifications.read",
+                      "notifications.reply",
+                      "audio.play",
+                      "audio.record",
+                      "system.status",
+                      "system.wake",
+                      "kiro.cli"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "platform",
+                "appVersion",
+                "capabilities"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "v",
+            "code",
+            "device"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "hello"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "deviceId": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "token": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "device": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "windows",
+                    "macos",
+                    "linux",
+                    "android"
+                  ]
+                },
+                "appVersion": {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "capabilities": {
+                  "maxItems": 40,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "screen.capture",
+                      "ui.tree",
+                      "ui.act",
+                      "input.pointer",
+                      "input.keyboard",
+                      "gesture",
+                      "global.action",
+                      "apps.list",
+                      "apps.launch",
+                      "windows.list",
+                      "windows.focus",
+                      "clipboard",
+                      "fs",
+                      "shell",
+                      "notifications.read",
+                      "notifications.reply",
+                      "audio.play",
+                      "audio.record",
+                      "system.status",
+                      "system.wake",
+                      "kiro.cli"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "platform",
+                "appVersion",
+                "capabilities"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "v",
+            "deviceId",
+            "token",
+            "device"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "result"
+            },
+            "id": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "data": {},
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 60
+                },
+                "message": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ok"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "event": {
+              "type": "string",
+              "enum": [
+                "owner_activity",
+                "local_stop",
+                "local_resume",
+                "notification",
+                "foreground_changed",
+                "screen_locked",
+                "screen_unlocked"
+              ]
+            },
+            "data": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "type",
+            "event",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "heartbeat"
+            },
+            "state": {
+              "type": "object",
+              "properties": {
+                "locked": {
+                  "type": "boolean"
+                },
+                "foregroundApp": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "battery": {
+                  "type": "object",
+                  "properties": {
+                    "percent": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "charging": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "percent",
+                    "charging"
+                  ],
+                  "additionalProperties": false
+                },
+                "network": {
+                  "type": "string",
+                  "enum": [
+                    "offline",
+                    "wifi",
+                    "ethernet",
+                    "cellular",
+                    "unknown"
+                  ]
+                },
+                "cpuPercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "memoryPercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "diskFreeGb": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "idleSeconds": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CoreToDevice": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "paired"
+            },
+            "deviceId": {
+              "type": "string"
+            },
+            "token": {
+              "type": "string"
+            },
+            "coreKey": {
+              "description": "Ed25519 public key, base64url (raw 32 bytes)",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "deviceId",
+            "token",
+            "coreKey"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "welcome"
+            },
+            "deviceId": {
+              "type": "string"
+            },
+            "serverTime": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "coreKey": {
+              "type": "string"
+            },
+            "stopped": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "deviceId",
+            "serverTime",
+            "coreKey",
+            "stopped"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "payload": {
+              "description": "JSON of CommandPayload; verify sig over these exact bytes",
+              "type": "string"
+            },
+            "sig": {
+              "description": "base64url Ed25519 signature",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "payload",
+            "sig"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cancel"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "halt"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "resume"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "error"
+            },
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CommandPayload": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "params": {},
+        "issuedAt": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "deviceId",
+        "action",
+        "params",
+        "issuedAt",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    "DeviceState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "locked": {
+          "type": "boolean"
+        },
+        "foregroundApp": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "battery": {
+          "type": "object",
+          "properties": {
+            "percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "charging": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "percent",
+            "charging"
+          ],
+          "additionalProperties": false
+        },
+        "network": {
+          "type": "string",
+          "enum": [
+            "offline",
+            "wifi",
+            "ethernet",
+            "cellular",
+            "unknown"
+          ]
+        },
+        "cpuPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "memoryPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "diskFreeGb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "idleSeconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "actions": {
+      "screen.capture": {
+        "capability": "screen.capture",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "display": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8
+            },
+            "windowId": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "maxWidth": {
+              "default": 1280,
+              "type": "integer",
+              "minimum": 320,
+              "maximum": 3840
+            }
+          },
+          "required": [
+            "maxWidth"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "ui.tree": {
+        "capability": "ui.tree",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "windowId": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "maxNodes": {
+              "default": 400,
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 2000
+            }
+          },
+          "required": [
+            "maxNodes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "ui.act": {
+        "capability": "ui.act",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "invoke",
+                "click",
+                "set_value",
+                "toggle",
+                "focus",
+                "expand",
+                "collapse",
+                "select",
+                "scroll_into_view",
+                "scroll_forward",
+                "scroll_backward"
+              ]
+            },
+            "value": {
+              "type": "string",
+              "maxLength": 10000
+            }
+          },
+          "required": [
+            "elementId",
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "input.click": {
+        "capability": "input.pointer",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20000
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20000
+            },
+            "button": {
+              "default": "left",
+              "type": "string",
+              "enum": [
+                "left",
+                "right",
+                "middle"
+              ]
+            },
+            "double": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "button",
+            "double"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "input.type": {
+        "capability": "input.keyboard",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10000
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "input.key": {
+        "capability": "input.keyboard",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "keys": {
+              "minItems": 1,
+              "maxItems": 5,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20
+              }
+            }
+          },
+          "required": [
+            "keys"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "input.scroll": {
+        "capability": "input.pointer",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "dx": {
+              "default": 0,
+              "type": "integer",
+              "minimum": -5000,
+              "maximum": 5000
+            },
+            "dy": {
+              "type": "integer",
+              "minimum": -5000,
+              "maximum": 5000
+            },
+            "x": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "y": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "dx",
+            "dy"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "gesture.tap": {
+        "capability": "gesture",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20000
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20000
+            },
+            "long": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "long"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "gesture.swipe": {
+        "capability": "gesture",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "x1": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "y1": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "x2": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "y2": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "durationMs": {
+              "default": 300,
+              "type": "integer",
+              "minimum": 50,
+              "maximum": 5000
+            }
+          },
+          "required": [
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+            "durationMs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "global.action": {
+        "capability": "global.action",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "back",
+                "home",
+                "recents",
+                "notifications",
+                "quick_settings",
+                "lock_screen"
+              ]
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "apps.list": {
+        "capability": "apps.list",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "apps.launch": {
+        "capability": "apps.launch",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "app": {
+              "description": "App name on desktop, package name on Android",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "args": {
+              "default": [],
+              "maxItems": 10,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 500
+              }
+            }
+          },
+          "required": [
+            "app",
+            "args"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "windows.list": {
+        "capability": "windows.list",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "windows.focus": {
+        "capability": "windows.focus",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "windowId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "windowId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "clipboard.read": {
+        "capability": "clipboard",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "clipboard.write": {
+        "capability": "clipboard",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 100000
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "fs.list": {
+        "capability": "fs",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "fs.read": {
+        "capability": "fs",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "fs.write": {
+        "capability": "fs",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 2000000
+            },
+            "overwrite": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path",
+            "content",
+            "overwrite"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "shell.run": {
+        "capability": "shell",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "cwd": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "timeoutMs": {
+              "default": 60000,
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 600000
+            }
+          },
+          "required": [
+            "command",
+            "timeoutMs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "notifications.list": {
+        "capability": "notifications.read",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "app": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "limit": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "limit"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "notifications.reply": {
+        "capability": "notifications.reply",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            }
+          },
+          "required": [
+            "key",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "audio.play": {
+        "capability": "audio.play",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "mime": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "url",
+            "mime"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "system.status": {
+        "capability": "system.status",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "system.schedule_wake": {
+        "capability": "system.wake",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "at": {
+              "description": "epoch ms",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "at",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "kiro.run": {
+        "capability": "kiro.cli",
+        "params": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "repoPath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "task": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20000
+            },
+            "trustTools": {
+              "default": [],
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 100
+              }
+            },
+            "timeoutMs": {
+              "default": 900000,
+              "type": "integer",
+              "minimum": 10000,
+              "maximum": 3600000
+            }
+          },
+          "required": [
+            "repoPath",
+            "task",
+            "trustTools",
+            "timeoutMs"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

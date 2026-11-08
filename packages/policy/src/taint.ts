@@ -3,7 +3,7 @@
  * Kinds: web pages, emails and messages from other people, documents, device notifications.
  */
 export interface TaintSource {
-  kind: 'web' | 'email' | 'message' | 'document' | 'notification' | 'tool_output';
+  kind: 'web' | 'email' | 'message' | 'document' | 'notification' | 'screen' | 'tool_output';
   source: string; // URL, sender, file name …
   at: number;
 }

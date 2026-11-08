@@ -1,4 +1,4 @@
-import type { LlmMessage, ModelRouter } from '@feroxes/llm';
+import type { ContentPart, LlmMessage, ModelRouter } from '@feroxes/llm';
 import type { MemoryService } from '@feroxes/memory';
 import { type Clock, type Sensitivity, systemClock } from '@feroxes/shared';
 import { coreMemoryPrompt, systemPrompt } from './prompts.ts';
@@ -81,7 +81,23 @@ export class ContextBuilder {
       memoryIds = latestUser.meta?.memoryIds ?? [];
     }
 
+    // Screenshots are expensive: only the two most recent are sent as images. They follow the
+    // whole group of tool results, because providers require tool results right after the call.
+    const imageIds = new Set(history.filter((m) => m.role === 'tool' && m.images?.length).slice(-2).map((m) => m.id));
+    let pendingImages: ContentPart[] = [];
+    const flushImages = () => {
+      if (pendingImages.length) messages.push({ role: 'user', content: pendingImages });
+      pendingImages = [];
+    };
+
     for (const m of history) {
+      if (m.role !== 'tool') flushImages();
+      if (m.role === 'tool' && m.images?.length) {
+        const keep = imageIds.has(m.id);
+        messages.push({ role: 'tool', toolCallId: m.toolCallId!, toolName: m.toolName!, content: keep ? m.content : `${m.content}\n[older screenshot omitted to save tokens]`, ...(m.isError ? { isError: true } : {}) });
+        if (keep) pendingImages.push({ type: 'text', text: `Image returned by ${m.toolName}:` }, ...m.images.map((i): ContentPart => ({ type: 'image', mediaType: i.mediaType, dataBase64: i.dataBase64 })));
+        continue;
+      }
       if (m.role === 'user') {
         const block = m.id === latestUser?.id ? rendered : m.renderedContext;
         messages.push({ role: 'user', content: block ? `${m.content}\n\n${block}` : m.content });
@@ -91,6 +107,7 @@ export class ContextBuilder {
         messages.push({ role: 'tool', toolCallId: m.toolCallId!, toolName: m.toolName!, content: m.content, ...(m.isError ? { isError: true } : {}) });
       }
     }
+    flushImages();
     // The last earlier turn is a third breakpoint, so the next request reuses the whole prefix.
     if (messages.length > 3) breakpoints.push(messages.length - 2);
 

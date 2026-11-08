@@ -106,6 +106,8 @@ export interface ToolRuntimeOptions {
   /** Model-facing output is truncated beyond this many characters; the full text becomes an artifact. */
   maxContentChars?: number;
   defaultTimeoutMs?: number;
+  /** How long an "allow for this task" device-control grant lasts. */
+  taskGrantMs?: number;
   /** Called for `notify`-level actions (in-app notification, push in Phase 2). */
   notify?: (message: { title: string; body: string; runId: string }) => void;
 }
@@ -118,7 +120,7 @@ export class ToolRuntime {
   private readonly o: Required<Omit<ToolRuntimeOptions, 'notify'>> & Pick<ToolRuntimeOptions, 'notify'>;
 
   constructor(options: ToolRuntimeOptions) {
-    this.o = { clock: systemClock, logger: noopLogger, maxContentChars: 8000, defaultTimeoutMs: 60_000, ...options };
+    this.o = { clock: systemClock, logger: noopLogger, maxContentChars: 8000, defaultTimeoutMs: 60_000, taskGrantMs: 15 * 60_000, ...options };
   }
 
   async invoke(req: InvocationRequest, ctx: InvocationContext): Promise<InvocationOutcome> {
@@ -145,7 +147,7 @@ export class ToolRuntime {
     }
     const args = parsed.data;
     const category = tool.riskFor?.(args) ?? tool.risk.category;
-    const decision = this.o.policy.decide({ tool: tool.name, category, args, taint: ctx.taint, actor: ctx.actor });
+    const decision = this.o.policy.decide({ tool: tool.name, category, args, taint: ctx.taint, actor: ctx.actor, runId: req.runId });
 
     const record: ToolCallRecord = { id: req.callId, runId: req.runId, tool: tool.name, args, idempotencyKey: req.idempotencyKey, status: 'running', category, startedAt: this.o.clock.now() };
 
@@ -205,6 +207,9 @@ export class ToolRuntime {
     const parsed = tool.input.safeParse(req.args);
     if (!parsed.success) return { status: 'invalid', error: `Edited arguments are invalid: ${parsed.error.issues.map((i) => i.message).join('; ')}` };
     const record: ToolCallRecord = { id: req.callId, runId: req.runId, tool: tool.name, args: parsed.data, idempotencyKey: key, status: 'running', category: approval.category, approvalId, startedAt: this.o.clock.now() };
+    if (approval.scope === 'task' && approval.category === 'device_control') {
+      this.o.policy.grant({ runId: approval.runId, category: 'device_control', expiresAt: this.o.clock.now() + this.o.taskGrantMs, approvalId });
+    }
     return this.execute(tool, req, parsed.data, record, full, 'approved');
   }
 

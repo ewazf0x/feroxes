@@ -28,6 +28,8 @@ export interface ApprovalRequest {
   decidedAt?: number;
   editedArgs?: unknown;
   note?: string;
+  /** "task" = allow this kind of action for the rest of the task (device control only). */
+  scope?: 'once' | 'task';
 }
 
 export interface ApprovalStore {
@@ -75,7 +77,7 @@ export class ApprovalService {
     return a;
   }
 
-  async decide(id: string, decision: { approve: boolean; editedArgs?: unknown; note?: string }): Promise<ApprovalRequest> {
+  async decide(id: string, decision: { approve: boolean; editedArgs?: unknown; note?: string; scope?: 'once' | 'task' }): Promise<ApprovalRequest> {
     const a = await this.store.get(id);
     if (!a) throw new Error(`approval ${id} not found`);
     const now = this.clock.now();
@@ -88,6 +90,7 @@ export class ApprovalService {
     a.decidedAt = now;
     if (decision.editedArgs !== undefined) a.editedArgs = decision.editedArgs;
     if (decision.note) a.note = decision.note;
+    if (decision.scope && decision.approve) a.scope = decision.scope;
     await this.store.put(a);
     this.listeners.forEach((l) => l(a));
     return a;

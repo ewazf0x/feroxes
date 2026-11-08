@@ -59,8 +59,8 @@ export interface AgentRuntimeOptions {
   logger?: Logger;
   /** Sensitivity assumed for conversation text itself (the owner's words are personal by default). */
   conversationSensitivity?: Sensitivity;
-  /** Toolsets offered on every turn. */
-  toolsets?: string[];
+  /** Toolsets offered on each turn; a function lets them follow which devices are online. */
+  toolsets?: string[] | (() => string[]);
   /** Called after an interactive turn finishes, e.g. to schedule debounced memory extraction. */
   onTurnComplete?: (info: { sessionId: string; runId: string }) => void;
 }
@@ -127,7 +127,7 @@ export class AgentRuntime {
   }
 
   /** Records the owner's decision and resumes the waiting run. */
-  async resolveApproval(approvalId: string, decision: { approve: boolean; editedArgs?: unknown; note?: string }): Promise<{ runId: string; done: Promise<Run> } | undefined> {
+  async resolveApproval(approvalId: string, decision: { approve: boolean; editedArgs?: unknown; note?: string; scope?: 'once' | 'task' }): Promise<{ runId: string; done: Promise<Run> } | undefined> {
     const approval = await this.o.approvals.decide(approvalId, decision);
     const run = await this.o.store.getRun(approval.runId);
     if (!run || run.status !== 'waiting_approval' || run.waitingApprovalId !== approvalId) return undefined;
@@ -251,7 +251,7 @@ export class AgentRuntime {
           priority: run.priority,
           ...(run.tier ? { tier: run.tier } : {}),
           messages: ctx.messages,
-          tools: this.o.registry.specs(this.o.toolsets),
+          tools: this.o.registry.specs(typeof this.o.toolsets === 'function' ? this.o.toolsets() : this.o.toolsets),
           sensitivity: requestSensitivity,
           cacheBreakpoints: ctx.cacheBreakpoints,
           cacheKey: session.id,
@@ -347,7 +347,8 @@ export class AgentRuntime {
       const content =
         outcome.status === 'executed' ? outcome.result.content : outcome.status === 'denied' ? `Not done: ${outcome.reason}` : `Error: ${outcome.error}`;
       const isError = outcome.status !== 'executed' || outcome.result.isError === true;
-      await this.o.store.appendMessage({ id: uuidv7(), sessionId: run.sessionId, role: 'tool', content, toolCallId: call.id, toolName: call.name, ...(isError ? { isError: true } : {}), runId: run.id, createdAt: this.o.clock.now() });
+      const images = outcome.status === 'executed' ? outcome.result.images : undefined;
+      await this.o.store.appendMessage({ id: uuidv7(), sessionId: run.sessionId, role: 'tool', content, toolCallId: call.id, toolName: call.name, ...(isError ? { isError: true } : {}), ...(images?.length ? { images } : {}), runId: run.id, createdAt: this.o.clock.now() });
       this.o.events.publish('run.tool', { runId: run.id, sessionId: run.sessionId, tool: fromWireName(call.name), status: outcome.status, summary: content.slice(0, 200) });
       processed = i + 1;
       const { approvalFor: _drop, ...rest } = step.data;

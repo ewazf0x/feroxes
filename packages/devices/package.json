@@ -1,0 +1,17 @@
+{
+  "name": "@feroxes/devices",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Device Hub: pairing, authentication, signed command dispatch, STOP propagation, device state, and the desktop/phone tools.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/policy": "workspace:*",
+    "@feroxes/protocol": "workspace:*",
+    "@feroxes/shared": "workspace:*",
+    "@feroxes/tools": "workspace:*",
+    "zod": "^4.1.0"
+  }
+}

@@ -63,6 +63,8 @@ export interface SessionMessage {
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
+  /** Screenshots returned by a tool; only the latest ones are sent to the model. */
+  images?: { mediaType: string; dataBase64: string }[];
   providerState?: Extract<LlmMessage, { role: 'assistant' }>['providerState'];
   runId?: string;
   /** Exact memory block sent with this user turn, so later prompts stay byte-identical (prompt caching). */
