@@ -247,7 +247,12 @@ async function serve() {
   }
 
   process.stdout.write(`FEROXES_READY ${JSON.stringify({ url: srv.url, token })}\n`);
-  process.stderr.write(`Feroxes Core listening on ${srv.url}${staticDir ? ' — open it in a browser or the desktop app' : ''}. Ctrl+C to stop.\n`);
+  // The link carries the app token in the #fragment, which browsers never send to a server.
+  process.stderr.write(
+    staticDir
+      ? `\nFeroxes is running. Open it in your browser:\n\n  ${srv.url}/#token=${token}\n\nKeep this window open. Ctrl+C stops Feroxes.\n`
+      : `Feroxes Core listening on ${srv.url}. Run \`node scripts/build-ui.mjs\` once to open it in a browser. Ctrl+C to stop.\n`,
+  );
 
   let closing = false;
   const shutdown = async () => {
