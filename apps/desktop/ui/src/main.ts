@@ -1,4 +1,4 @@
-import { api, localStore } from './api.ts';
+import { api, bootError, localStore } from './api.ts';
 import { chatScreen } from './chat.ts';
 import { type Signal, h, list, signal, transition } from './core.ts';
 import { icon } from './icons.ts';
@@ -97,10 +97,25 @@ function palette(): Node {
   );
 }
 
+function bootErrorScreen(root: HTMLElement, message: string): void {
+  root.replaceChildren(
+    h('div', { class: 'boot-error' },
+      h('div', { class: 'boot-error-card' },
+        h('div', { class: 'boot-error-logo' }),
+        h('h1', {}, 'Feroxes could not start its brain'),
+        h('p', { class: 'muted' }, message),
+        h('p', { class: 'muted sm' }, 'Check that the Core service can run, then reopen Feroxes. You can also start it from a terminal with ', h('code', {}, 'feroxes serve'), '.'),
+      ),
+    ),
+  );
+  root.removeAttribute('aria-busy');
+}
+
 function boot(): void {
   const root = document.getElementById('app')!;
   const saved = localStore.getItem('feroxes-theme');
   if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
+  if (bootError) return bootErrorScreen(root, bootError);
   connect();
 
   // Keep the badge count fresh on load.

@@ -7,9 +7,12 @@ import { signal } from './core.ts';
  */
 declare global {
   interface Window {
-    __FEROXES__?: { url: string; token: string };
+    __FEROXES__?: { url?: string; token?: string; error?: string };
   }
 }
+
+/** Set by the desktop shell when the Core could not be started, so the UI shows a clear message. */
+export const bootError: string | null = window.__FEROXES__?.error ?? null;
 
 /** sessionStorage/localStorage throw in opaque origins (previews); never let that crash the app. */
 function safeStore(kind: 'session' | 'local'): Pick<Storage, 'getItem' | 'setItem'> {
@@ -26,7 +29,8 @@ export const sessionStore = safeStore('session');
 export const localStore = safeStore('local');
 
 function connection(): { url: string; token: string } {
-  if (window.__FEROXES__) return window.__FEROXES__;
+  const injected = window.__FEROXES__;
+  if (injected?.url) return { url: injected.url, token: injected.token ?? '' };
   const fromHash = new URLSearchParams(location.hash.slice(1)).get('token');
   if (fromHash) {
     sessionStore.setItem('feroxes-token', fromHash);
