@@ -1,0 +1,17 @@
+{
+  "name": "@feroxes/pc-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Feroxes PC device agent: connects this computer to the Core's Device Hub and executes signed commands (Windows first; Linux and macOS where tools exist).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "feroxes-agent": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@feroxes/protocol": "workspace:*",
+    "zod": "^4.1.0"
+  }
+}

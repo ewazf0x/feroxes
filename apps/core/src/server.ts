@@ -2,7 +2,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
+import type { Duplex } from 'node:stream';
 import { explainRun, HORIZONS, thinkingQuality } from '@feroxes/brain';
+import { acceptWebSocket } from '@feroxes/devices';
 import { DAY, errorMessage } from '@feroxes/shared';
 import type { Feroxes } from './container.ts';
 
@@ -16,6 +18,10 @@ export interface ServerOptions {
   token?: string;
   staticDir?: string;
   allowedOrigins?: string[];
+  /** Extra addresses that serve only the device endpoint (e.g. the Tailscale IP for the phone). */
+  deviceHosts?: string[];
+  /** Port for those device-only listeners; defaults to the main port. */
+  devicePort?: number;
 }
 
 type Handler = (ctx: { req: IncomingMessage; res: ServerResponse; params: Record<string, string>; url: URL; body: () => Promise<Record<string, unknown>> }) => Promise<unknown>;
@@ -231,19 +237,56 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
     }
   });
 
-  try {
-    await new Promise<void>((resolveListen, rejectListen) => {
-      server.once('error', rejectListen); // e.g. EADDRINUSE: report it instead of crashing on an unhandled 'error'
-      server.listen(opts.port ?? 0, '127.0.0.1', () => {
-        server.off('error', rejectListen);
+  // ---- device WebSocket (/devices): devices authenticate in-band (pair code or device token), so
+  // no app token here. Browsers always send an Origin header and device agents never do, so any
+  // upgrade with an Origin is refused: a web page can't reach the device endpoint.
+  const deviceSockets = new Set<Duplex>();
+  const onUpgrade = (checkHost: boolean) => (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    socket.on('error', () => socket.destroy());
+    const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+    const host = (req.headers.host ?? '').replace(/:\d+$/, '');
+    if (path !== '/devices' || req.headers.origin !== undefined || (checkHost && host !== '127.0.0.1' && host !== 'localhost')) {
+      socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      return;
+    }
+    const link = acceptWebSocket(req, socket, head, { maxPayload: 32 * 1024 * 1024 });
+    if (!link) return;
+    deviceSockets.add(socket);
+    socket.on('close', () => deviceSockets.delete(socket));
+    fx.hub.attach(link);
+  };
+  server.on('upgrade', onUpgrade(true));
+
+  // Optional device-only listeners on other addresses (e.g. the PC's Tailscale IP, so the phone can
+  // connect over WireGuard). They serve the device endpoint and nothing else: no API, no UI.
+  const deviceServers = (opts.deviceHosts ?? []).map((h) => {
+    const s = createServer((_req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('Only the Feroxes device endpoint is available here.');
+    });
+    s.on('upgrade', onUpgrade(false));
+    return { host: h, server: s };
+  });
+
+  const listen = (s: Server, port: number, host: string) =>
+    new Promise<void>((resolveListen, rejectListen) => {
+      s.once('error', rejectListen); // e.g. EADDRINUSE: report it instead of crashing on an unhandled 'error'
+      s.listen(port, host, () => {
+        s.off('error', rejectListen);
         resolveListen();
       });
     });
+  try {
+    await listen(server, opts.port ?? 0, '127.0.0.1');
+    const mainPort = (server.address() as { port: number }).port;
+    for (const d of deviceServers) await listen(d.server, opts.devicePort ?? mainPort, d.host);
   } catch (error) {
     offEvents();
     offNotify();
     offSystem();
     offMode();
+    server.close();
+    for (const d of deviceServers) d.server.close();
     throw error;
   }
   const port = (server.address() as { port: number }).port;
@@ -258,7 +301,8 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
       offSystem();
       offMode();
       for (const c of clients) c.end();
-      await new Promise<void>((r) => server.close(() => r()));
+      for (const s of deviceSockets) s.destroy();
+      await Promise.all([server, ...deviceServers.map((d) => d.server)].map((s) => new Promise<void>((r) => s.close(() => r()))));
     },
   };
 }
