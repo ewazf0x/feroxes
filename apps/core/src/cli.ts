@@ -19,6 +19,7 @@ const HELP = `feroxes <command>
   demo      End-to-end demo with scripted providers and a simulated PC (no API keys needed)
   chat      Chat with your real providers; data is saved in FEROXES_DATA_DIR/feroxes.db
   serve     Run the Core as a local service (the PC/mobile apps connect to it); 24/7 brain
+  live      Verify with your real credentials: live [providers|voice|connectors|all] [--quick]
   keygen    Print a new FEROXES_MASTER_KEY
   help      Show this help
 
@@ -286,6 +287,20 @@ switch (command) {
   case 'serve':
     await serve();
     break;
+  case 'live': {
+    // Live verification with real credentials: providers, voice, connectors (see live.ts).
+    if (!process.env.FEROXES_DATA_DIR) process.env.FEROXES_DATA_DIR = feroxesConfigDir();
+    const { formatRows, liveConnectors, liveProviders, liveVoice } = await import('./live.ts');
+    const what = process.argv[3] ?? 'all';
+    const env = loadEnv();
+    const rows = [
+      ...(what === 'all' || what === 'providers' ? await liveProviders(env, { quick: process.argv.includes('--quick') }) : []),
+      ...(what === 'all' || what === 'voice' ? await liveVoice(env) : []),
+      ...(what === 'all' || what === 'connectors' ? await liveConnectors(env) : []),
+    ];
+    process.stdout.write(`${formatRows(rows)}\n\n${rows.filter((r) => r.result === 'PASS').length} passed, ${rows.filter((r) => r.result === 'FAIL').length} failed, ${rows.filter((r) => r.result === 'SKIP').length} skipped\n`);
+    process.exit(rows.some((r) => r.result === 'FAIL') ? 1 : 0);
+  }
   case 'keygen':
     process.stdout.write(`FEROXES_MASTER_KEY=${Vault.generateKey()}\n`);
     break;

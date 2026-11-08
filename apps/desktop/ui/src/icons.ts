@@ -27,6 +27,7 @@ const PATHS: Record<string, string> = {
   chevron: 'M8 5.5l4.5 4.5L8 14.5',
   refresh: 'M15.5 8A6 6 0 0 0 4.6 6.5M4.5 12a6 6 0 0 0 10.9 1.5M15.5 3.5V8H11M4.5 16.5V12H9',
   lock: 'M6 9V6.5a4 4 0 0 1 8 0V9M5.5 9h9A1.5 1.5 0 0 1 16 10.5v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 15.5v-5A1.5 1.5 0 0 1 5.5 9Z',
+  plug: 'M7.5 3v3.5M12.5 3v3.5M5.5 6.5h9V9a4.5 4.5 0 0 1-9 0V6.5ZM10 13.5V17',
 };
 
 export function icon(name: keyof typeof PATHS | string, size = 18): SVGSVGElement {

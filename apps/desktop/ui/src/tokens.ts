@@ -66,7 +66,8 @@ export const tokens = {
   },
 } as const;
 
-const kebab = (s: string) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+// accentSoft → accent-soft, accent2 → accent-2 (the stylesheet uses --c-accent-2).
+const kebab = (s: string) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`).replace(/([a-z])(\d)/g, '$1-$2');
 
 /** CSS custom properties for both themes (themes switch with [data-theme] or the OS setting). */
 export function tokensCss(): string {

@@ -2,6 +2,7 @@ import { api, bootError, localStore } from './api.ts';
 import { chatScreen } from './chat.ts';
 import { type Signal, h, list, signal, transition } from './core.ts';
 import { icon } from './icons.ts';
+import { integrationsScreen } from './integrations.ts';
 import { devicesScreen, goalsScreen, memoryScreen, mindScreen, setTheme, settingsScreen, todayScreen, usageScreen } from './screens.ts';
 import { connect, connection, navigate, route, status, toast, toasts } from './store.ts';
 
@@ -12,13 +13,16 @@ const NAV = [
   { id: 'memory', label: 'Memory', icon: 'memory' },
   { id: 'goals', label: 'Goals', icon: 'goals' },
   { id: 'devices', label: 'Devices', icon: 'devices' },
+  { id: 'integrations', label: 'Integrations', icon: 'plug' },
   { id: 'usage', label: 'Usage', icon: 'activity' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ] as const;
 
-const SCREENS: Record<string, () => Node> = { today: todayScreen, chat: chatScreen, mind: mindScreen, memory: memoryScreen, goals: goalsScreen, devices: devicesScreen, usage: usageScreen, settings: settingsScreen };
+const SCREENS: Record<string, () => Node> = { today: todayScreen, chat: chatScreen, mind: mindScreen, memory: memoryScreen, goals: goalsScreen, devices: devicesScreen, integrations: integrationsScreen, usage: usageScreen, settings: settingsScreen };
 
 const paletteOpen = signal(false);
+/** ⌘K on macOS, Ctrl K elsewhere (Windows fonts have no ⌘ glyph, and it isn't the Windows key). */
+export const SHORTCUT = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K';
 
 function rail(): Node {
   return h('nav', { class: 'rail' },
@@ -32,7 +36,7 @@ function rail(): Node {
         n.id === 'chat' ? h('span', { class: () => `nav-badge${(status()?.approvals ?? 0) > 0 ? ' danger' : ''}`, style: () => ((status()?.approvals ?? 0) > 0 ? '' : 'display:none') }, () => String(status()?.approvals ?? 0)) : false),
     ),
     h('div', { class: 'rail-spacer' }),
-    h('button', { class: 'nav-item', on: { click: () => (paletteOpen.set(true)) } }, icon('search'), h('span', { class: 'grow' }, 'Command'), h('kbd', { class: 'faint', style: 'font-size: var(--text-xs)' }, '⌘K')),
+    h('button', { class: 'nav-item', on: { click: () => (paletteOpen.set(true)) } }, icon('search'), h('span', { class: 'grow' }, 'Command'), h('kbd', { class: 'kbd' }, SHORTCUT)),
   );
 }
 
@@ -137,7 +141,7 @@ function boot(): void {
   mount();
 
   root.replaceChildren(
-    h('div', {},
+    h('div', { class: 'app-root' },
       () => (status()?.state === 'stopped' ? h('div', { class: 'stopped-banner' }, 'Feroxes is stopped — nothing runs until you resume') : false),
       h('div', { class: 'shell' }, rail(), h('div', { class: 'main' }, topbar(), screenHost)),
       () => (paletteOpen() ? palette() : false),

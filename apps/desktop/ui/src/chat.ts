@@ -129,7 +129,7 @@ export function chatScreen(): Node {
       const msgs = messages();
       const stream = streaming();
       const nodes: Node[] = [h('div', { class: 'chat-inner' },
-        msgs.length === 0 && !stream ? h('div', { class: 'empty' }, 'Say hello to Feroxes, or press ⌘K for commands.') : false,
+        msgs.length === 0 && !stream ? h('div', { class: 'empty' }, `Say hello to Feroxes, or press ${/Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K'} for commands.`) : false,
         ...groupMessages(msgs).map(renderGroup),
         stream ? h('div', { class: 'msg assistant' }, h('div', { class: 'msg-role' }, 'Feroxes'), h('div', { class: 'bubble cursor' }, renderMarkdown(stream))) : false,
       )];
