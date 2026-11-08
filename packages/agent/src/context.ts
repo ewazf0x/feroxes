@@ -38,7 +38,14 @@ export class ContextBuilder {
   private readonly assistantName: string;
   private readonly ownerName: string | undefined;
 
-  constructor(deps: { memory: MemoryService; store: AgentStore; router: ModelRouter; clock?: Clock; timeZone: string; assistantName?: string; ownerName?: string }) {
+  /** Blocks that change rarely (self-model, goals, skills): placed in the cached system context. */
+  private readonly stableContext: (() => Promise<string[]>) | undefined;
+  /** Blocks that change every turn (situation, owner state): sent with the latest message. */
+  private readonly turnContext: ((query: string, sessionId: string) => Promise<string[]>) | undefined;
+
+  constructor(deps: { memory: MemoryService; store: AgentStore; router: ModelRouter; clock?: Clock; timeZone: string; assistantName?: string; ownerName?: string; stableContext?: () => Promise<string[]>; turnContext?: (query: string, sessionId: string) => Promise<string[]> }) {
+    this.stableContext = deps.stableContext;
+    this.turnContext = deps.turnContext;
     this.memory = deps.memory;
     this.store = deps.store;
     this.router = deps.router;
@@ -63,7 +70,7 @@ export class ContextBuilder {
     const core = await this.memory.coreBlock(input.maxSensitivity, b.core);
     const messages: LlmMessage[] = [
       { role: 'system', content: systemPrompt({ assistantName: this.assistantName, ...(this.ownerName ? { ownerName: this.ownerName } : {}) }) },
-      { role: 'system', content: coreMemoryPrompt(core.text, this.timeZone, new Date(this.clock.now())) },
+      { role: 'system', content: coreMemoryPrompt(core.text, this.timeZone, new Date(this.clock.now()), (await this.stableContext?.()) ?? []) },
     ];
     const breakpoints = [0, 1];
     if (session.rollingSummary) messages.push({ role: 'system', content: `Earlier in this conversation:\n${session.rollingSummary}` });
@@ -74,7 +81,7 @@ export class ContextBuilder {
     let memoryIds: string[] = [];
     if (latestUser && latestUser.renderedContext === undefined) {
       const ctx = await this.memory.buildContext({ query: latestUser.content, maxSensitivity: input.maxSensitivity, budgets: { core: b.core, retrieved: b.retrieved }, excludeIds: core.ids });
-      rendered = ctx.rendered;
+      rendered = [ctx.rendered, ...((await this.turnContext?.(latestUser.content, session.id)) ?? [])].filter(Boolean).join('\n\n');
       memoryIds = ctx.usedIds;
     } else if (latestUser) {
       rendered = latestUser.renderedContext;

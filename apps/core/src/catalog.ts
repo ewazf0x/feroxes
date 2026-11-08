@@ -58,6 +58,11 @@ export const ROUTES: RouteConfig[] = [
   { id: 'memory.consolidate', tier: 'fast', requiredCapabilities: [], defaultPriority: 'deferrable', allowEscalation: false },
   { id: 'session.summarize', tier: 'fast', requiredCapabilities: [], defaultPriority: 'routine', allowEscalation: false, maxOutputTokens: 600 },
   { id: 'classify', tier: 'fast', requiredCapabilities: ['json_schema'], defaultPriority: 'important', allowEscalation: true, maxOutputTokens: 150 },
+  // Brain: cheap models for the debate voices, a stronger one for the synthesis and reflection.
+  { id: 'think.perspective', tier: 'fast', requiredCapabilities: [], defaultPriority: 'interactive', allowEscalation: false, maxOutputTokens: 350 },
+  { id: 'think.synthesis', tier: 'balanced', requiredCapabilities: [], defaultPriority: 'interactive', allowEscalation: false, maxOutputTokens: 700 },
+  { id: 'brain.reflect', tier: 'balanced', requiredCapabilities: ['json_schema'], defaultPriority: 'deferrable', allowEscalation: false, maxOutputTokens: 1500 },
+  { id: 'brain.briefing', tier: 'fast', requiredCapabilities: [], defaultPriority: 'important', allowEscalation: false, maxOutputTokens: 700 },
 ];
 
 export interface ResolvedCatalog {

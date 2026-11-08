@@ -1,0 +1,20 @@
+{
+  "name": "@feroxes/brain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Continuity and initiative: self-model, goals, skills, deliberation, situation awareness, owner-state model, reflection, briefings, explanations, scheduling, goal pursuit.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/agent": "workspace:*",
+    "@feroxes/devices": "workspace:*",
+    "@feroxes/llm": "workspace:*",
+    "@feroxes/memory": "workspace:*",
+    "@feroxes/metering": "workspace:*",
+    "@feroxes/policy": "workspace:*",
+    "@feroxes/shared": "workspace:*",
+    "@feroxes/tools": "workspace:*"
+  }
+}
