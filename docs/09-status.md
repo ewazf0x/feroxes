@@ -110,3 +110,34 @@ Not built: incoming webhooks (WhatsApp, Instagram), the Discord Gateway, and Sla
 6. **Installers:** fix the GitHub billing lock, then re-run the Desktop workflow on PR #1.
 
 Send me the outputs and I'll fix whatever fails.
+
+## Update — AI providers in Settings (fixes "No model is eligible for route chat.turn")
+
+**Cause.** Providers could only be set through `.env`, and production used a built-in list of model ids taken from third-party summaries, which might not exist. With no `.env`, the router had no models at all. The chat error pointed to a "Settings → Providers" screen that didn't exist.
+
+**Fix.**
+- **Settings → Providers** covers OpenAI, Anthropic Claude, Google Gemini, OpenRouter, Ollama and Kiro (CLI). For each one you can:
+  - save, replace or remove the key (sealed in the Vault, shown masked afterwards);
+  - turn the provider on or off;
+  - find models with the provider's documented model-list API, or type a model id;
+  - assign each model to fast, balanced, frontier or local, and choose the chat model;
+  - enter prices (OpenRouter supplies them);
+  - run a real connection test.
+- **Changes apply immediately** to the live router, with no restart. They persist across restarts, and keys from `.env` are imported once.
+- **No invented model ids or prices.** Unknown prices use a deliberately high estimate ($15 / $75 per 1M tokens), so spending limits trigger early rather than late.
+- **Router:** an empty or failing tier now falls back to the nearest configured tier. Background work never moves to a more expensive tier. With nothing configured at all, the error says so plainly.
+- **Kiro:**
+  - Uses the official CLI in headless mode (`kiro-cli chat --no-interactive`, prompt on stdin), with your existing `kiro-cli login` or `KIRO_API_KEY`. Kiro documents API keys for headless use on Pro, Pro+, Pro Max and Power plans.
+  - Detects whether the CLI is installed (`--version`) and signed in (`whoami`).
+  - Never passes `--trust-tools` or `--trust-all-tools`, so Kiro only reasons and Feroxes's policy gate runs every action.
+  - Stays **off until you accept a terms notice.** Kiro's billing terms restrict using a subscription through third-party harnesses, and that may apply here.
+  - I couldn't load the exact current text of that billing FAQ in this session (the page renders client-side). The notice is based on the earlier check, recorded in docs/06.
+
+**Verified here (with local stand-ins, labelled as such in the tests):**
+- Ollama end to end over real HTTP to a local server that speaks Ollama's API: model list, test, a chat answer, ledger tokens, and a wrong model id explained.
+- Keys sealed (no plaintext in the database file), masked, and kept across a restart.
+- Fallback from a provider that rejects its key to the next one.
+- The spending limit refuses a test before any model request is sent.
+- Kiro run through a stub `kiro-cli` program: detection, sign-in status, headless call with the prompt on stdin, no `--trust` flags, and the signed-out case.
+
+**Not verified (needs you):** real requests to OpenAI, Anthropic, Gemini, OpenRouter, Ollama on your PC and Kiro on your PC. In the app use **Test connection** on each provider, or run `node apps/core/src/cli.ts live providers`.

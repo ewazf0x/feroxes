@@ -14,6 +14,7 @@ import { InMemoryPlanStore, ToolRegistry, ToolRuntime, fileTools, notifyOwner, p
 import { AsyncQueue, type ConversationPort, ElevenLabsStt, ElevenLabsTts, VoiceService } from '@feroxes/voice';
 import { ROUTES, resolveCatalog } from './catalog.ts';
 import type { Env } from './config.ts';
+import { Providers } from './providers.ts';
 import { SecretStore, loadVault } from './vault.ts';
 
 export interface Notification {
@@ -38,7 +39,9 @@ const VOICE_PRICES = (tts: string, stt: string): ModelPrice[] => [
 export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Logger; adapters?: Map<string, ProviderAdapter>; catalog?: ReturnType<typeof resolveCatalog>; dbPath?: string; fetch?: typeof fetch } = {}) {
   const clock = opts.clock ?? systemClock;
   const logger = opts.logger ?? createJsonLogger({ level: 'warn' });
-  const resolved = opts.catalog ?? resolveCatalog(env);
+  // Providers and models come from Settings → Providers (applied below, once the vault is open).
+  // Tests and the demo pass a fixed catalog instead.
+  const resolved = opts.catalog ?? { providers: [], models: [], tiers: {}, routes: ROUTES, prices: [], keys: new Map<string, string>() };
   // The Core still boots with no providers, so the app opens on a clean first run. Chat and
   // reasoning don't work until at least one provider is configured (API keys in the .env file, or a
   // Kiro login); memory, goals, devices and the dashboard still work. There is no in-app key entry yet.
@@ -97,6 +100,13 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   // ---- vault: every credential at rest is sealed (AES-256-GCM); the key lives outside the DB ----
   const { vault, source: vaultKeySource } = loadVault(process.env, dataDir, { ephemeral: dbPath === ':memory:' });
   const secrets = new SecretStore(vault, stores.docs);
+
+  // ---- AI providers (Settings → Providers): keys sealed in the vault, applied to the live router ----
+  const providers = new Providers({ docs: stores.docs, secrets, catalog, adapters, prices, router, health, logger, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+  if (!opts.catalog) {
+    providers.importFromEnv(env);
+    providers.apply();
+  }
 
   // ---- devices: the hub's signing key is persisted (sealed), because paired apps pin its public key ----
   const registry: DeviceRegistry = { put: async (d) => stores.docs.put('device', d), list: async () => stores.docs.list<DeviceRecord>('device') };
@@ -291,6 +301,7 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
     brain,
     voice,
     secrets,
+    providers,
     connectors,
     vaultKeySource,
     dataDir,

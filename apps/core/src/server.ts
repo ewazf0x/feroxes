@@ -7,6 +7,7 @@ import { explainRun, HORIZONS, thinkingQuality } from '@feroxes/brain';
 import { acceptWebSocket } from '@feroxes/devices';
 import { DAY, errorMessage } from '@feroxes/shared';
 import type { Feroxes } from './container.ts';
+import { PROVIDER_IDS, type ProviderId } from './providers.ts';
 
 /**
  * Local API for the Feroxes apps (REST + server-sent events), on 127.0.0.1 only.
@@ -177,6 +178,38 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
   route('POST', '/api/devices/pair', async () => fx.hub.createPairingCode());
   route('DELETE', '/api/devices/:id', async ({ params }) => (await fx.hub.revoke(params.id!), { ok: true }));
 
+  // ---- AI providers (Settings → Providers). Keys go in once and never come back out. ----
+  const pid = (id: string | undefined): ProviderId => {
+    if (!PROVIDER_IDS.includes(id as ProviderId)) throw new HttpError(404, `Unknown provider "${id}".`);
+    return id as ProviderId;
+  };
+  route('GET', '/api/providers', async () => fx.providers.summaries());
+  route('GET', '/api/providers/kiro/status', async () => fx.providers.kiroStatus(true));
+  route('POST', '/api/providers/chat-default', async ({ body }) => {
+    const b = await body();
+    fx.providers.setChatDefault(pid(String(b.providerId)), String(b.modelKey ?? ''));
+    return fx.providers.summaries();
+  });
+  route('POST', '/api/providers/:id', async ({ params, body }) => {
+    const b = await body();
+    return fx.providers.update(pid(params.id), {
+      ...(typeof b.enabled === 'boolean' ? { enabled: b.enabled } : {}),
+      ...(Array.isArray(b.models) ? { models: b.models as never } : {}),
+      ...(b.defaultModel === null || typeof b.defaultModel === 'string' ? { defaultModel: b.defaultModel as string | null } : {}),
+      ...(typeof b.baseUrl === 'string' ? { baseUrl: b.baseUrl } : {}),
+      ...(b.kiro && typeof b.kiro === 'object' ? { kiro: b.kiro as never } : {}),
+      ...(b.acknowledgeKiroTerms === true ? { acknowledgeKiroTerms: true } : {}),
+    });
+  });
+  route('POST', '/api/providers/:id/key', async ({ params, body }) => (fx.providers.setKey(pid(params.id), String((await body()).key ?? '')), { ok: true }));
+  route('DELETE', '/api/providers/:id/key', async ({ params }) => (fx.providers.removeKey(pid(params.id)), { ok: true }));
+  route('POST', '/api/providers/:id/discover', async ({ params }) => fx.providers.discover(pid(params.id)));
+  route('POST', '/api/providers/:id/test', async ({ params, body }) => {
+    const b = await body();
+    return fx.providers.test(pid(params.id), typeof b.model === 'string' ? b.model : undefined);
+  });
+  const offProviders = fx.providers.onChange(() => send('providers', {}));
+
   // ---- integrations (no secret ever leaves through these routes) ----
   const caps = (v: unknown) => (Array.isArray(v) ? v.map(String).slice(0, 50) : undefined);
   const fields = (v: unknown) => (v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, String(x ?? '').slice(0, 4000)])) : {});
@@ -324,6 +357,7 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
     offSystem();
     offMode();
     offConnectors();
+    offProviders();
     server.close();
     for (const d of deviceServers) d.server.close();
     throw error;
@@ -340,6 +374,7 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
       offSystem();
       offMode();
       offConnectors();
+    offProviders();
       for (const c of clients) c.end();
       for (const s of deviceSockets) s.destroy();
       await Promise.all([server, ...deviceServers.map((d) => d.server)].map((s) => new Promise<void>((r) => s.close(() => r()))));

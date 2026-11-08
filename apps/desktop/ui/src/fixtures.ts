@@ -94,7 +94,23 @@ const activityDemo = [
   { seq: 6, ts: ago(60 * 24 * 12), action: 'connector.instagram.connect', decision: 'system', outcome: 'success', summary: 'Connected Instagram account @sam.studio (profile, insights, comments_read)' },
 ];
 
-const MAP: Record<string, unknown> = { '/connectors': connectorsDemo, '/connectors/instagram/activity': activityDemo, '/status': status, '/today': today, '/sessions': [{ id: 'demo', title: 'Tidy Downloads' }], '/sessions/demo/messages': messages, '/approvals': approvals, '/mind': mind, '/goals': { horizons: ['now', 'today', 'week', 'month', 'long'], goals }, '/devices': devices, '/usage': usage };
+const pnotes = (s: string) => [s];
+const providersDemo = {
+  chatModel: { providerId: 'anthropic', modelKey: 'claude-sonnet-example', providerName: 'Anthropic Claude' },
+  routedTiers: { fast: ['ollama/llama3.2:3b'], balanced: ['anthropic/claude-sonnet-example'], frontier: [], local: ['ollama/llama3.2:3b'] },
+  cautiousPrice: { input: 15, output: 75 },
+  kiroTermsNotice: "Kiro documents headless mode for CI/CD pipelines and automation scripts. Kiro's billing terms restrict using a Kiro subscription through third-party harnesses that route requests outside Kiro's own interfaces. Turn Kiro on only if you accept that risk.",
+  providers: [
+    { id: 'openai', name: 'OpenAI', keyLabel: 'API key', keyRequired: true, keyPlaceholder: 'sk-…', keyUrl: 'https://platform.openai.com/api-keys', baseUrlEditable: false, docsUrl: '', notes: pnotes('Model list from GET /v1/models.'), enabled: false, hasKey: false, models: [], status: 'off' },
+    { id: 'anthropic', name: 'Anthropic Claude', keyLabel: 'API key', keyRequired: true, keyPlaceholder: 'sk-ant-…', keyUrl: 'https://console.anthropic.com/settings/keys', baseUrlEditable: false, docsUrl: '', notes: ['Model list from GET /v1/models.', 'Enter prices from anthropic.com/pricing; until then budgets use a cautious estimate.'], enabled: true, hasKey: true, keyHint: 'sk-ant-…a1b2', models: [{ key: 'claude-sonnet-example', tier: 'balanced', enabled: true }], defaultModel: 'claude-sonnet-example', status: 'connected', lastTest: { at: ago(3), ok: true, auth: 'ok', modelsAvailable: 9, model: 'claude-sonnet-example', latencyMs: 812, reply: 'OK', tokens: { input: 14, output: 2 }, costNanoUsd: 210_000 } },
+    { id: 'google', name: 'Google Gemini', keyLabel: 'API key', keyRequired: true, baseUrlEditable: false, docsUrl: '', notes: pnotes(''), enabled: false, hasKey: false, models: [], status: 'off' },
+    { id: 'openrouter', name: 'OpenRouter', keyLabel: 'API key', keyRequired: true, baseUrlEditable: false, docsUrl: '', notes: pnotes(''), enabled: true, hasKey: true, keyHint: 'sk-or-v…9f3c', models: [], status: 'incomplete' },
+    { id: 'ollama', name: 'Ollama (local)', keyRequired: false, baseUrlEditable: true, baseUrl: 'http://localhost:11434', docsUrl: '', notes: pnotes('Runs on your PC.'), enabled: true, hasKey: false, models: [{ key: 'llama3.2:3b', tier: 'local', enabled: true }], status: 'untested' },
+    { id: 'kiro', name: 'Kiro (CLI)', keyLabel: 'Kiro API key (headless, optional)', keyRequired: false, baseUrlEditable: false, docsUrl: '', notes: ['Kiro has no public HTTP model API. Feroxes runs the official Kiro CLI in headless mode.', 'Kiro only reasons: Feroxes never enables Kiro\'s own tools.'], enabled: false, hasKey: false, models: [{ key: 'default', tier: 'balanced', enabled: true }], kiro: { command: 'kiro-cli', useLogin: true, status: { installed: true, command: 'kiro-cli', version: 'kiro-cli 2.1.0', authenticated: true, method: 'login', detail: 'Logged in with Builder ID · sam@example.com' } }, status: 'off' },
+  ],
+};
+
+const MAP: Record<string, unknown> = { '/providers': providersDemo, '/connectors': connectorsDemo, '/connectors/instagram/activity': activityDemo, '/status': status, '/today': today, '/sessions': [{ id: 'demo', title: 'Tidy Downloads' }], '/sessions/demo/messages': messages, '/approvals': approvals, '/mind': mind, '/goals': { horizons: ['now', 'today', 'week', 'month', 'long'], goals }, '/devices': devices, '/usage': usage };
 
 export function demoResponse(path: string, init?: { method?: string; body?: unknown }): Promise<any> {
   if (init?.method === 'POST' || init?.method === 'DELETE') return Promise.resolve({ ok: true });

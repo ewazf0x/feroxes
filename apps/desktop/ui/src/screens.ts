@@ -1,4 +1,5 @@
 import { api, localStore } from './api.ts';
+import { providersSection } from './providers.ts';
 import { type Signal, append, h, signal, timeAgo, usd } from './core.ts';
 import { icon } from './icons.ts';
 import { navigate, on, toast } from './store.ts';
@@ -149,7 +150,8 @@ export function usageScreen(): Node {
 // ---------------- Settings ----------------
 
 export function settingsScreen(): Node {
-  return h('div', { class: 'page page-narrow' }, pageHead('Settings'),
+  return h('div', { class: 'page page-narrow' }, pageHead('Settings', 'AI providers, values and appearance.'),
+    h('section', { id: 'providers', class: 'col', style: 'gap: var(--space-3); margin-bottom: var(--space-6)' }, h('h2', { class: 'section-title' }, 'Providers'), providersSection()),
     view<any>(() => api('/mind'), (d) => h('div', { class: 'col', style: 'gap: var(--space-4)' },
       card(h('strong', {}, 'Values (only you can change these)'), h('div', { class: 'col', style: 'gap: 6px; margin-top: 10px' }, ...d.self.values.map((v: string) => h('div', { class: 'row', style: 'gap: 8px' }, icon('check', 15), h('span', {}, v))))),
       card(h('strong', {}, 'Boundaries'), h('div', { class: 'col', style: 'gap: 6px; margin-top: 10px' }, ...d.self.boundaries.map((v: string) => h('div', { class: 'row', style: 'gap: 8px' }, icon('lock', 15), h('span', {}, v))))),

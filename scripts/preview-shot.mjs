@@ -44,7 +44,7 @@ if (name === 'sweep') {
   body = `await page.setViewportSize({ width: 1280, height: 820 });
   await theme(page, ${JSON.stringify(theme)});
   await go(page, ${JSON.stringify(screen)});
-  ${drawer ? `await page.evaluate((id) => { const t = [...document.querySelectorAll('.integ-tile')].find((b) => b.querySelector('.logo-' + id)); t && t.click(); }, ${JSON.stringify(drawer)}); await page.waitForTimeout(500);` : ''}
+  ${drawer ? `await page.evaluate((id) => { const t = [...document.querySelectorAll('.integ-tile, .provider-row')].find((b) => b.querySelector('.logo-' + id)); t && t.click(); }, ${JSON.stringify(drawer)}); await page.waitForTimeout(500);` : ''}
   return JSON.stringify({ errs, ...(await page.evaluate(${checks})) });`;
 }
 

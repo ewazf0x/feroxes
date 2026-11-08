@@ -154,6 +154,12 @@ export class ModelRouter {
         const down = tier === 'frontier' ? 'balanced' : tier === 'balanced' ? 'fast' : undefined;
         if (down) push(catalog.tier(down), down);
       }
+      // Last resort: any other configured tier, nearest first (within the economy cap). A model
+      // from another tier beats "no answer" when the preferred tier is empty or all of it fails.
+      // Background work never moves to a pricier tier; only owner-facing work may.
+      const rest: Record<Tier, Tier[]> = { fast: ['balanced', 'local', 'frontier'], balanced: ['fast', 'frontier', 'local'], frontier: ['balanced', 'fast', 'local'], local: ['fast', 'balanced', 'frontier'] };
+      const ownerFacing = priority === 'interactive' || priority === 'important';
+      for (const t of rest[tier]) if (capOk(t) && (ownerFacing || tierRank(t) <= tierRank(tier))) push(catalog.tier(t), t);
     }
 
     const needs = new Set<Capability>(route.requiredCapabilities);
@@ -190,7 +196,8 @@ export class ModelRouter {
     }
 
     if (candidates.length === 0) {
-      throw new NoCandidatesError(req.route, excluded.map((e) => `${e.modelId}: ${e.reason}`).join('; ') || `tier ${tier} has no models`);
+      const anyChat = catalog.listModels().some((m) => m.enabled && m.modality === 'chat' && catalog.provider(m.providerId)?.enabled);
+      throw new NoCandidatesError(req.route, !anyChat ? 'no AI model is set up yet. Open Settings → Providers, add a provider and choose a model' : excluded.map((e) => `${e.modelId}: ${e.reason}`).join('; ') || `no configured model fits (tier ${tier})`);
     }
     return { route, priority, tier, ...(decision ? { decision } : {}), candidates, excluded };
   }
