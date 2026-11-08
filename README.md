@@ -40,6 +40,7 @@ In `chat`: `/goals`, `/goal <title>`, `/self`, `/why`, `/briefing`, `/reflect`, 
 
 | Doc | Contents |
 |---|---|
+| [09 Status](docs/09-status.md) | **What is implemented, what is verified, what still needs your credentials or hardware** |
 | [08 Desktop app](docs/08-desktop-app.md) | **The PC app:** Tauri shell, attach-or-spawn the Core, self-contained packaging, the 24/7 background Core, building installers |
 | [07 Kiro as the brain](docs/07-kiro-brain.md) | Kiro as the main reasoning engine, with API models as fallback |
 | [06 Revision 2](docs/06-revision-pc-apps-brain.md) | **Current decisions:** PC-hosted Core with SQLite, native apps, device control, voice, the brain layer, Kiro, status of every requested capability, new roadmap |
@@ -66,7 +67,9 @@ In `chat`: `/goals`, `/goal <title>`, `/self`, `/why`, `/briefing`, `/reflect`, 
 | `packages/voice` | ElevenLabs Scribe STT and Flash TTS, sentence streaming, push-to-talk, spoken STOP |
 | `packages/brain` | Self-model, goals, skills, debate, situation awareness, owner state, reflection, briefings, explanations, scheduler |
 | `apps/core` | Composition root, provider catalog, vault, CLI, demo, local API server (`serve`) |
-| `apps/desktop/ui` | The PC app's web UI: design tokens, a dependency-free reactive core, every screen, command palette |
+| `packages/connectors` | Integrations framework (OAuth 2.0 + PKCE, sealed tokens, refresh, revocation, health, audit, policy-gated tools) and 12 official-API connectors |
+| `apps/pc-agent` | The PC device agent: pairs with the Core, verifies signed commands, controls Windows (and Linux/macOS where tools exist) |
+| `apps/desktop/ui` | The PC app's web UI: design tokens, a dependency-free reactive core, every screen including Integrations, command palette |
 | `apps/desktop/src-tauri` | The native Tauri 2 shell that launches the Core and hosts the UI |
 
 ## Non-negotiables
