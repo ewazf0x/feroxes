@@ -61,7 +61,7 @@ export interface CoreSnapshot {
   generatedAt: number;
 }
 
-function matches(m: Memory, f: MemoryFilter): boolean {
+export function matches(m: Memory, f: MemoryFilter): boolean {
   if (f.layers && !f.layers.includes(m.layer)) return false;
   if (f.kinds && !f.kinds.includes(m.kind)) return false;
   if (f.statuses && !f.statuses.includes(m.status)) return false;

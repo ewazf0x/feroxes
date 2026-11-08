@@ -1,0 +1,18 @@
+{
+  "name": "@feroxes/store-sqlite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Durable storage for Feroxes in one SQLite file (Node's built-in node:sqlite): every store interface, full-text search, vectors, append-only audit.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/agent": "workspace:*",
+    "@feroxes/memory": "workspace:*",
+    "@feroxes/metering": "workspace:*",
+    "@feroxes/policy": "workspace:*",
+    "@feroxes/shared": "workspace:*",
+    "@feroxes/tools": "workspace:*"
+  }
+}
