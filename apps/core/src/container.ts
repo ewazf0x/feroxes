@@ -52,7 +52,13 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   const adapters = opts.adapters ?? new Map(resolved.providers.map((p) => [p.id, createAdapter(p, resolved.keys.get(p.id))]));
 
   const notifications: Notification[] = [];
-  const notify = (n: Omit<Notification, 'at'>) => notifications.push({ ...n, at: clock.now() });
+  const notificationListeners = new Set<(n: Notification) => void>();
+  const notify = (n: Omit<Notification, 'at'>) => {
+    const full = { ...n, at: clock.now() };
+    notifications.push(full);
+    if (notifications.length > 200) notifications.shift();
+    for (const l of notificationListeners) l(full);
+  };
 
   // ---- control and metering ----
   const system = new SystemControl({ store: stores.system, clock });
@@ -259,6 +265,10 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
     brain,
     voice,
     notifications,
+    onNotification(cb: (n: Notification) => void) {
+      notificationListeners.add(cb);
+      return () => notificationListeners.delete(cb);
+    },
     workspace,
     async flushMemory(sessionId: string) {
       clearTimeout(pendingExtraction.get(sessionId));
