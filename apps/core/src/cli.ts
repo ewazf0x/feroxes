@@ -1,16 +1,23 @@
 #!/usr/bin/env node
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync } from 'node:fs';
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { explainRun } from '@feroxes/brain';
-import { formatUsd } from '@feroxes/shared';
+import { createJsonLogger, formatUsd } from '@feroxes/shared';
 import { loadEnv } from './config.ts';
 import { createFeroxes } from './container.ts';
 import { runDemo } from './demo.ts';
+import { startServer } from './server.ts';
 import { Vault } from './vault.ts';
 
 const HELP = `feroxes <command>
 
   demo      End-to-end demo with scripted providers and a simulated PC (no API keys needed)
   chat      Chat with your real providers; data is saved in FEROXES_DATA_DIR/feroxes.db
+  serve     Run the Core as a local service (the PC/mobile apps connect to it); 24/7 brain
   keygen    Print a new FEROXES_MASTER_KEY
   help      Show this help
 
@@ -124,6 +131,89 @@ async function chat() {
   rl.close();
 }
 
+/**
+ * Per-user config directory for Feroxes, chosen to match what the desktop app computes on each OS
+ * (Rust `dirs::config_dir()/feroxes`): %APPDATA%\feroxes on Windows, ~/Library/Application
+ * Support/feroxes on macOS, $XDG_CONFIG_HOME|~/.config/feroxes on Linux. The runtime handshake
+ * lives here so the app and a background Core find each other regardless of working directory.
+ */
+function feroxesConfigDir(): string {
+  const home = homedir();
+  if (process.platform === 'win32') return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'feroxes');
+  if (process.platform === 'darwin') return join(home, 'Library', 'Application Support', 'feroxes');
+  return join(process.env.XDG_CONFIG_HOME || join(home, '.config'), 'feroxes');
+}
+
+/**
+ * Run the Core as a long-lived local service on 127.0.0.1. The desktop and mobile apps connect to
+ * it over the local API. Prints a `FEROXES_READY {json}` line on stdout that the desktop host reads
+ * to learn the URL and app token; also writes FEROXES_DATA_DIR/runtime.json so an app can attach to
+ * an already-running Core (the 24/7 background brain) instead of starting a second one.
+ */
+async function serve() {
+  // Default the data dir to the shared per-user config dir, so a background Core and an
+  // app-spawned Core use the same brain (one SQLite file) unless the owner sets FEROXES_DATA_DIR.
+  if (!process.env.FEROXES_DATA_DIR) process.env.FEROXES_DATA_DIR = feroxesConfigDir();
+  const env = loadEnv();
+  const dataDir = resolve(env.FEROXES_DATA_DIR);
+  mkdirSync(dataDir, { recursive: true });
+
+  // Stable app token, persisted (0600) so a restarted Core keeps the same token and paired apps
+  // reattach without re-pairing.
+  const tokenFile = join(dataDir, 'app-token');
+  let token: string;
+  try {
+    token = (await readFile(tokenFile, 'utf8')).trim();
+    if (!token) throw new Error('empty token file');
+  } catch {
+    token = randomBytes(24).toString('base64url');
+    await writeFile(tokenFile, token, { mode: 0o600 });
+  }
+
+  // Keep stdout clean for the handshake line; send logs to stderr.
+  const logger = createJsonLogger({ level: 'warn', write: (l) => process.stderr.write(`${l}\n`) });
+  const fx = await createFeroxes(env, { logger });
+  const stopScheduler = fx.brain.scheduler.start();
+
+  // Also serve the built UI, so Feroxes opens in a browser at the Core URL as well. The desktop app
+  // loads the same files from its own bundle. The assembled dir has index.html, tokens.css,
+  // styles.css and dist/ at its root.
+  const uiWww = resolve(import.meta.dirname, '../../desktop/ui/www');
+  const staticDir = existsSync(join(uiWww, 'index.html')) ? uiWww : undefined;
+
+  const srv = await startServer(fx, { port: env.FEROXES_PORT, token, ...(staticDir ? { staticDir } : {}) });
+
+  // Write the handshake where apps look for it. The config-dir copy is the rendezvous the desktop
+  // app reads to attach to an already-running Core (so it never starts a second one on the same
+  // database); the data-dir copy is for humans. Both are removed on a clean exit.
+  const payload = `${JSON.stringify({ url: srv.url, token, pid: process.pid, port: srv.port, startedAt: Date.now() }, null, 2)}\n`;
+  const runtimeFiles = [...new Set([join(dataDir, 'runtime.json'), join(feroxesConfigDir(), 'runtime.json')])];
+  for (const file of runtimeFiles) {
+    mkdirSync(resolve(file, '..'), { recursive: true });
+    await writeFile(file, payload, { mode: 0o600 });
+  }
+
+  process.stdout.write(`FEROXES_READY ${JSON.stringify({ url: srv.url, token })}\n`);
+  process.stderr.write(`Feroxes Core listening on ${srv.url}${staticDir ? ' — open it in a browser or the desktop app' : ''}. Ctrl+C to stop.\n`);
+
+  let closing = false;
+  const shutdown = async () => {
+    if (closing) return;
+    closing = true;
+    setTimeout(() => process.exit(0), 3000).unref(); // never hang on a stuck connection
+    await Promise.all(runtimeFiles.map((f) => rm(f, { force: true }).catch(() => {}))); // drop handshakes first, so no app attaches to a dying Core
+    try {
+      stopScheduler();
+      await srv.close();
+      await fx.shutdown();
+    } finally {
+      process.exit(0);
+    }
+  };
+  process.on('SIGINT', () => void shutdown());
+  process.on('SIGTERM', () => void shutdown());
+}
+
 const [command] = process.argv.slice(2);
 switch (command) {
   case 'demo':
@@ -131,6 +221,9 @@ switch (command) {
     break;
   case 'chat':
     await chat();
+    break;
+  case 'serve':
+    await serve();
     break;
   case 'keygen':
     process.stdout.write(`FEROXES_MASTER_KEY=${Vault.generateKey()}\n`);

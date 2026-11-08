@@ -37,7 +37,12 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   const clock = opts.clock ?? systemClock;
   const logger = opts.logger ?? createJsonLogger({ level: 'warn' });
   const resolved = opts.catalog ?? resolveCatalog(env);
-  if (resolved.providers.length === 0) throw new Error('No AI provider configured. Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, OLLAMA_BASE_URL.');
+  // The Core still boots with no providers so the app opens on a clean first run and the owner can
+  // add a key (or sign in to Kiro) from Settings. Chat and reasoning fail with a clear message
+  // until at least one provider is configured; memory, goals, devices and the dashboard all work.
+  if (resolved.providers.length === 0) {
+    logger.warn('No AI provider configured yet. Add a key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, OLLAMA_BASE_URL) or enable Kiro to start thinking.');
+  }
 
   const dataDir = resolve(env.FEROXES_DATA_DIR);
   const dbPath = opts.dbPath ?? join(dataDir, 'feroxes.db');
