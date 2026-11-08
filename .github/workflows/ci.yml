@@ -14,10 +14,10 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
+      # No pnpm cache until pnpm-lock.yaml is committed (setup-node's cache requires a lockfile).
       - uses: actions/setup-node@v4
         with:
           node-version: 26
-          cache: pnpm
       # The first install creates pnpm-lock.yaml; commit it, then switch to --frozen-lockfile.
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm run typecheck

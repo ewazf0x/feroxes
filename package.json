@@ -15,8 +15,10 @@
     "ui": "node scripts/build-ui.mjs",
     "icon": "node scripts/make-icon.mjs",
     "desktop:stage": "node scripts/build-desktop.mjs",
-    "desktop:dev": "node scripts/build-ui.mjs && pnpm -C apps/desktop exec tauri dev",
-    "desktop:build": "node scripts/build-desktop.mjs && pnpm -C apps/desktop exec tauri icon icon.png --output src-tauri/icons && pnpm -C apps/desktop exec tauri build",
+    "desktop:smoke": "node scripts/smoke-desktop.mjs",
+    "desktop:icons": "tauri icon apps/desktop/icon.png --output apps/desktop/src-tauri/icons",
+    "desktop:dev": "node scripts/build-desktop.mjs && pnpm run desktop:icons && tauri dev",
+    "desktop:build": "node scripts/build-desktop.mjs && pnpm run desktop:icons && tauri build",
     "tauri": "tauri"
   },
   "devDependencies": {
