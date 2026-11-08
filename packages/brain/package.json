@@ -15,6 +15,7 @@
     "@feroxes/metering": "workspace:*",
     "@feroxes/policy": "workspace:*",
     "@feroxes/shared": "workspace:*",
-    "@feroxes/tools": "workspace:*"
+    "@feroxes/tools": "workspace:*",
+    "zod": "^4.1.0"
   }
 }

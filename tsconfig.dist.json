@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false,
+    "removeComments": true,
+    "outDir": "build/core-dist",
+    "rootDir": "."
+  },
+  "include": ["packages/*/src/**/*.ts", "apps/core/src/**/*.ts", "apps/pc-agent/src/**/*.ts"],
+  "exclude": ["**/*.test.ts"]
+}

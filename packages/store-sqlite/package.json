@@ -14,5 +14,8 @@
     "@feroxes/policy": "workspace:*",
     "@feroxes/shared": "workspace:*",
     "@feroxes/tools": "workspace:*"
+  },
+  "devDependencies": {
+    "@feroxes/llm": "workspace:*"
   }
 }

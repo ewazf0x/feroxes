@@ -347,7 +347,7 @@ export class DeviceHub {
     if (!record || this.connections.get(record.id) !== conn) return;
     this.connections.delete(record.id);
     record.lastSeenAt = conn.lastSeenAt;
-    void this.o.registry.put(record);
+    this.o.registry.put(record).catch((e) => this.o.logger.warn('device record save failed', { error: String(e) }));
     this.rejectPending(record.id, new DeviceError('disconnected', `${record.name} disconnected.`));
     this.emit(record, 'disconnected', {});
   }

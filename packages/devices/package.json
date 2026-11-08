@@ -13,5 +13,9 @@
     "@feroxes/shared": "workspace:*",
     "@feroxes/tools": "workspace:*",
     "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@feroxes/agent": "workspace:*",
+    "@feroxes/llm": "workspace:*"
   }
 }

@@ -1,3 +1,5 @@
+import { scrubSecrets } from './secrets.ts';
+
 /**
  * Minimal structured logger interface. Production uses pino behind this interface;
  * the built-in JSON logger keeps packages dependency-free and testable.
@@ -13,11 +15,15 @@ export interface Logger {
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 export type LogLevel = keyof typeof LEVELS;
 
-/** Keys whose values never reach a log line. */
-const REDACT_KEYS = /^(authorization|cookie|set-cookie|password|passwd|secret|token|api[-_]?key|apikey|x-api-key|access[-_]?token|refresh[-_]?token|private[-_]?key)$/i;
+/** Keys whose values never reach a log line or the audit log. */
+const REDACT_KEYS =
+  /^(authorization|proxy[-_]?authorization|cookies?|set-cookie|password|passwd|passphrase|secret|client[-_]?secret|app[-_]?secret|signing[-_]?secret|token|access[-_]?token|refresh[-_]?token|id[-_]?token|bot[-_]?token|session[-_]?token|api[-_]?key|apikey|x-api-key|private[-_]?key|master[-_]?key|pkcs8|credentials?|code[-_]?verifier|webhook[-_]?url)$/i;
 
+/** Redacts secret-named keys at any depth and masks credentials found inside string values. */
 export function redact(value: unknown, depth = 0): unknown {
-  if (depth > 6 || value === null || typeof value !== 'object') return value;
+  if (typeof value === 'string') return scrubSecrets(value);
+  if (value === null || typeof value !== 'object') return value;
+  if (depth > 6) return '[truncated]'; // never pass deeper structures through unchecked
   if (Array.isArray(value)) return value.map((v) => redact(v, depth + 1));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value)) {
@@ -35,9 +41,10 @@ export function createJsonLogger(options: {
   const bindings = options.bindings ?? {};
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
 
+  const safeBindings = redact(bindings) as Record<string, unknown>;
   const log = (level: LogLevel, msg: string, fields?: Record<string, unknown>) => {
     if (LEVELS[level] < min) return;
-    const entry = { ts: new Date().toISOString(), level, msg, ...bindings, ...(fields ? (redact(fields) as object) : {}) };
+    const entry = { ts: new Date().toISOString(), level, msg: scrubSecrets(msg), ...safeBindings, ...(fields ? (redact(fields) as object) : {}) };
     write(JSON.stringify(entry));
   };
 

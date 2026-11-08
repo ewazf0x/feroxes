@@ -2,9 +2,12 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
+import type { Duplex } from 'node:stream';
 import { explainRun, HORIZONS, thinkingQuality } from '@feroxes/brain';
+import { acceptWebSocket } from '@feroxes/devices';
 import { DAY, errorMessage } from '@feroxes/shared';
 import type { Feroxes } from './container.ts';
+import { PROVIDER_IDS, type ProviderId } from './providers.ts';
 
 /**
  * Local API for the Feroxes apps (REST + server-sent events), on 127.0.0.1 only.
@@ -16,6 +19,10 @@ export interface ServerOptions {
   token?: string;
   staticDir?: string;
   allowedOrigins?: string[];
+  /** Extra addresses that serve only the device endpoint (e.g. the Tailscale IP for the phone). */
+  deviceHosts?: string[];
+  /** Port for those device-only listeners; defaults to the main port. */
+  devicePort?: number;
 }
 
 type Handler = (ctx: { req: IncomingMessage; res: ServerResponse; params: Record<string, string>; url: URL; body: () => Promise<Record<string, unknown>> }) => Promise<unknown>;
@@ -171,6 +178,59 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
   route('POST', '/api/devices/pair', async () => fx.hub.createPairingCode());
   route('DELETE', '/api/devices/:id', async ({ params }) => (await fx.hub.revoke(params.id!), { ok: true }));
 
+  // ---- AI providers (Settings → Providers). Keys go in once and never come back out. ----
+  const pid = (id: string | undefined): ProviderId => {
+    if (!PROVIDER_IDS.includes(id as ProviderId)) throw new HttpError(404, `Unknown provider "${id}".`);
+    return id as ProviderId;
+  };
+  route('GET', '/api/providers', async () => fx.providers.summaries());
+  route('GET', '/api/providers/kiro/status', async () => fx.providers.kiroStatus(true));
+  route('POST', '/api/providers/chat-default', async ({ body }) => {
+    const b = await body();
+    fx.providers.setChatDefault(pid(String(b.providerId)), String(b.modelKey ?? ''));
+    return fx.providers.summaries();
+  });
+  route('POST', '/api/providers/:id', async ({ params, body }) => {
+    const b = await body();
+    return fx.providers.update(pid(params.id), {
+      ...(typeof b.enabled === 'boolean' ? { enabled: b.enabled } : {}),
+      ...(Array.isArray(b.models) ? { models: b.models as never } : {}),
+      ...(b.defaultModel === null || typeof b.defaultModel === 'string' ? { defaultModel: b.defaultModel as string | null } : {}),
+      ...(typeof b.baseUrl === 'string' ? { baseUrl: b.baseUrl } : {}),
+      ...(b.kiro && typeof b.kiro === 'object' ? { kiro: b.kiro as never } : {}),
+      ...(b.acknowledgeKiroTerms === true ? { acknowledgeKiroTerms: true } : {}),
+    });
+  });
+  route('POST', '/api/providers/:id/key', async ({ params, body }) => (fx.providers.setKey(pid(params.id), String((await body()).key ?? '')), { ok: true }));
+  route('DELETE', '/api/providers/:id/key', async ({ params }) => (fx.providers.removeKey(pid(params.id)), { ok: true }));
+  route('POST', '/api/providers/:id/discover', async ({ params }) => fx.providers.discover(pid(params.id)));
+  route('POST', '/api/providers/:id/test', async ({ params, body }) => {
+    const b = await body();
+    return fx.providers.test(pid(params.id), typeof b.model === 'string' ? b.model : undefined);
+  });
+  const offProviders = fx.providers.onChange(() => send('providers', {}));
+
+  // ---- integrations (no secret ever leaves through these routes) ----
+  const caps = (v: unknown) => (Array.isArray(v) ? v.map(String).slice(0, 50) : undefined);
+  const fields = (v: unknown) => (v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, String(x ?? '').slice(0, 4000)])) : {});
+  route('GET', '/api/connectors', async () => fx.connectors.summaries());
+  route('POST', '/api/connectors/:id/app', async ({ params, body }) => (await fx.connectors.setAppCredentials(params.id!, fields((await body()).fields)), { ok: true }));
+  route('POST', '/api/connectors/:id/connect', async ({ params, body }) => {
+    const b = await body();
+    const c = fx.connectors.connector(params.id!);
+    const chosen = caps(b.capabilities);
+    if (c.auth.kind === 'oauth2') return { authorizeUrl: fx.connectors.beginOAuth(c.id, chosen).authorizeUrl };
+    return { connection: await fx.connectors.connectWithToken(c.id, fields(b.fields), chosen) };
+  });
+  route('POST', '/api/connections/:id/check', async ({ params }) => fx.connectors.check(params.id!));
+  route('POST', '/api/connections/:id/capabilities', async ({ params, body }) => fx.connectors.setCapabilities(params.id!, caps((await body()).capabilities) ?? []));
+  route('DELETE', '/api/connections/:id', async ({ params }) => fx.connectors.disconnect(params.id!));
+  route('GET', '/api/connectors/:id/activity', async ({ params }) => {
+    const id = fx.connectors.connector(params.id!).id;
+    return (await fx.audit.recent({ prefixes: [`connector.${id}.`, `${id}.`], limit: 60 })).reverse().map((e) => ({ seq: e.seq, ts: e.ts, action: e.action, category: e.category, decision: e.decision, outcome: e.outcome, summary: e.summary }));
+  });
+  const offConnectors = fx.connectors.onChange((e) => send('connector', e));
+
   route('GET', '/api/usage', async () => ({ byModel: await fx.ledger.summarize({ from: Date.now() - 30 * DAY }, 'modelId'), budgets: await fx.budget.status(), power: fx.power.mode }));
   route('POST', '/api/system/stop', async ({ body }) => (await fx.system.stop('owner', String((await body()).reason ?? 'app')), summary()));
   route('POST', '/api/system/resume', async () => (await fx.system.resume('owner', 'app'), summary()));
@@ -193,6 +253,20 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
     return STREAMING;
   });
 
+  const oauthCallback = async (res: ServerResponse, url: URL) => {
+    const page = (title: string, msg: string, ok: boolean) => `<!doctype html><meta charset="utf-8"><title>${title}</title><meta name="viewport" content="width=device-width"><body style="font:15px/1.5 system-ui,sans-serif;background:#0a0a0d;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0"><div style="max-width:420px;text-align:center;padding:32px"><div style="font-size:40px">${ok ? '✓' : '✕'}</div><h1 style="font-size:20px;margin:8px 0">${title}</h1><p style="color:#aaa">${msg}</p></div></body>`;
+    const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+    let html: string;
+    try {
+      const conn = await fx.connectors.completeOAuth({ state: url.searchParams.get('state'), code: url.searchParams.get('code'), error: url.searchParams.get('error'), error_description: url.searchParams.get('error_description') });
+      html = page('Connected', `${esc(fx.connectors.connector(conn.connectorId).name)} account <b>${esc(conn.accountName)}</b> is connected to Feroxes. You can close this tab.`, true);
+    } catch (error) {
+      html = page('Not connected', esc(errorMessage(error)), false);
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
+    res.end(html);
+  };
+
   const origins = new Set(opts.allowedOrigins ?? ['tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost']);
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -211,6 +285,9 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
         res.writeHead(204, { 'access-control-allow-methods': 'GET,POST,DELETE', 'access-control-allow-headers': 'authorization,content-type', 'access-control-max-age': '600' });
         return void res.end();
       }
+      // OAuth loopback redirect (RFC 8252): a browser navigation can't carry the app token; the
+      // single-use, 10-minute `state` created by beginOAuth is what authorizes this request.
+      if (url.pathname === '/oauth/callback' && req.method === 'GET') return void (await oauthCallback(res, url));
       if (!url.pathname.startsWith('/api/')) return void (await serveStatic(res, url.pathname, opts.staticDir));
 
       const given = Buffer.from((req.headers.authorization ?? '').replace(/^Bearer /, ''));
@@ -231,7 +308,60 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
     }
   });
 
-  await new Promise<void>((r) => server.listen(opts.port ?? 0, '127.0.0.1', r));
+  // ---- device WebSocket (/devices): devices authenticate in-band (pair code or device token), so
+  // no app token here. Browsers always send an Origin header and device agents never do, so any
+  // upgrade with an Origin is refused: a web page can't reach the device endpoint.
+  const deviceSockets = new Set<Duplex>();
+  const onUpgrade = (checkHost: boolean) => (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    socket.on('error', () => socket.destroy());
+    const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+    const host = (req.headers.host ?? '').replace(/:\d+$/, '');
+    if (path !== '/devices' || req.headers.origin !== undefined || (checkHost && host !== '127.0.0.1' && host !== 'localhost')) {
+      socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      return;
+    }
+    const link = acceptWebSocket(req, socket, head, { maxPayload: 32 * 1024 * 1024 });
+    if (!link) return;
+    deviceSockets.add(socket);
+    socket.on('close', () => deviceSockets.delete(socket));
+    fx.hub.attach(link);
+  };
+  server.on('upgrade', onUpgrade(true));
+
+  // Optional device-only listeners on other addresses (e.g. the PC's Tailscale IP, so the phone can
+  // connect over WireGuard). They serve the device endpoint and nothing else: no API, no UI.
+  const deviceServers = (opts.deviceHosts ?? []).map((h) => {
+    const s = createServer((_req, res) => {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('Only the Feroxes device endpoint is available here.');
+    });
+    s.on('upgrade', onUpgrade(false));
+    return { host: h, server: s };
+  });
+
+  const listen = (s: Server, port: number, host: string) =>
+    new Promise<void>((resolveListen, rejectListen) => {
+      s.once('error', rejectListen); // e.g. EADDRINUSE: report it instead of crashing on an unhandled 'error'
+      s.listen(port, host, () => {
+        s.off('error', rejectListen);
+        resolveListen();
+      });
+    });
+  try {
+    await listen(server, opts.port ?? 0, '127.0.0.1');
+    const mainPort = (server.address() as { port: number }).port;
+    for (const d of deviceServers) await listen(d.server, opts.devicePort ?? mainPort, d.host);
+  } catch (error) {
+    offEvents();
+    offNotify();
+    offSystem();
+    offMode();
+    offConnectors();
+    offProviders();
+    server.close();
+    for (const d of deviceServers) d.server.close();
+    throw error;
+  }
   const port = (server.address() as { port: number }).port;
   return {
     server,
@@ -243,8 +373,11 @@ export async function startServer(fx: Feroxes, opts: ServerOptions = {}): Promis
       offNotify();
       offSystem();
       offMode();
+      offConnectors();
+    offProviders();
       for (const c of clients) c.end();
-      await new Promise<void>((r) => server.close(() => r()));
+      for (const s of deviceSockets) s.destroy();
+      await Promise.all([server, ...deviceServers.map((d) => d.server)].map((s) => new Promise<void>((r) => s.close(() => r()))));
     },
   };
 }

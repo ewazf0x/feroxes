@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Feroxes",
+  "version": "0.1.0",
+  "identifier": "dev.feroxes.desktop",
+  "build": {
+    "frontendDist": "../ui/www"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:*; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Your personal AI, on your PC.",
+    "longDescription": "Feroxes is a personal AI operating system for one owner: a private second brain and second hand that remembers, plans, routes across AI providers within a budget, and acts on your PC with your approval.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/core": "core",
+      "resources/runtime": "runtime"
+    }
+  }
+}

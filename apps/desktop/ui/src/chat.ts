@@ -1,7 +1,7 @@
 import { api } from './api.ts';
 import { type Signal, append, effect, h, list, signal } from './core.ts';
 import { icon } from './icons.ts';
-import { on, status, toast } from './store.ts';
+import { navigate, on, status, toast } from './store.ts';
 
 interface Msg {
   id: string;
@@ -48,7 +48,17 @@ function renderMarkdown(text: string): DocumentFragment {
   return frag;
 }
 
+/** Which model chat uses, or a way to set one up: chat is useless without a provider. */
+const chatModel = signal<{ ready: boolean; label: string } | null>(null);
+function loadChatModel() {
+  api<{ chatModel: { modelKey: string; providerName: string } | null; providers: { status: string; models: { enabled: boolean }[] }[] }>('/providers')
+    .then((s) => chatModel.set(s.chatModel ? { ready: true, label: `${s.chatModel.modelKey} · ${s.chatModel.providerName}` } : s.providers.some((p) => (p.status === 'connected' || p.status === 'untested') && p.models.some((m) => m.enabled)) ? { ready: true, label: 'automatic (your enabled models)' } : { ready: false, label: '' }))
+    .catch(() => chatModel.set(null));
+}
+
 export function chatScreen(): Node {
+  loadChatModel();
+  on('providers', () => loadChatModel());
   const messages = signal<Msg[]>([]);
   const streaming = signal<string>('');
   const approvals = signal<Approval[]>([]);
@@ -129,7 +139,9 @@ export function chatScreen(): Node {
       const msgs = messages();
       const stream = streaming();
       const nodes: Node[] = [h('div', { class: 'chat-inner' },
-        msgs.length === 0 && !stream ? h('div', { class: 'empty' }, 'Say hello to Feroxes, or press ⌘K for commands.') : false,
+        chatModel() && !chatModel()!.ready ? h('div', { class: 'card setup-card col' }, h('strong', {}, 'Feroxes has no AI model yet'), h('p', { class: 'muted' }, 'Add a provider (OpenAI, Claude, Gemini, OpenRouter, Ollama or Kiro), choose a model and test it. It takes a minute.'), h('button', { class: 'btn primary', on: { click: () => navigate('settings') } }, 'Set up a provider')) : false,
+        chatModel()?.ready ? h('div', { class: 'chat-model faint' }, 'Model: ', h('span', { class: 'mono' }, chatModel()!.label), ' · ', h('a', { href: '#settings', on: { click: (e: Event) => { e.preventDefault(); navigate('settings'); } } }, 'change')) : false,
+        msgs.length === 0 && !stream && chatModel()?.ready !== false ? h('div', { class: 'empty' }, `Say hello to Feroxes, or press ${/Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K'} for commands.`) : false,
         ...groupMessages(msgs).map(renderGroup),
         stream ? h('div', { class: 'msg assistant' }, h('div', { class: 'msg-role' }, 'Feroxes'), h('div', { class: 'bubble cursor' }, renderMarkdown(stream))) : false,
       )];

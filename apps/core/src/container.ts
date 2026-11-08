@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { AgentRuntime, type AgentEvents, ContextBuilder, memoryTools } from '@feroxes/agent';
 import { createBrain } from '@feroxes/brain';
+import { ConnectorManager, builtinConnectors } from '@feroxes/connectors';
 import { DeviceHub, type DeviceRecord, type DeviceRegistry, createDeviceTools, deviceToolsets } from '@feroxes/devices';
 import { Catalog, CostEstimator, HealthTracker, ModelRouter, type ProviderAdapter, createAdapter } from '@feroxes/llm';
 import { ConsolidationService, ExtractionService, MemoryService, routerEmbedder } from '@feroxes/memory';
@@ -13,6 +14,8 @@ import { InMemoryPlanStore, ToolRegistry, ToolRuntime, fileTools, notifyOwner, p
 import { AsyncQueue, type ConversationPort, ElevenLabsStt, ElevenLabsTts, VoiceService } from '@feroxes/voice';
 import { ROUTES, resolveCatalog } from './catalog.ts';
 import type { Env } from './config.ts';
+import { Providers } from './providers.ts';
+import { SecretStore, loadVault } from './vault.ts';
 
 export interface Notification {
   title: string;
@@ -36,8 +39,15 @@ const VOICE_PRICES = (tts: string, stt: string): ModelPrice[] => [
 export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Logger; adapters?: Map<string, ProviderAdapter>; catalog?: ReturnType<typeof resolveCatalog>; dbPath?: string; fetch?: typeof fetch } = {}) {
   const clock = opts.clock ?? systemClock;
   const logger = opts.logger ?? createJsonLogger({ level: 'warn' });
-  const resolved = opts.catalog ?? resolveCatalog(env);
-  if (resolved.providers.length === 0) throw new Error('No AI provider configured. Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, OLLAMA_BASE_URL.');
+  // Providers and models come from Settings → Providers (applied below, once the vault is open).
+  // Tests and the demo pass a fixed catalog instead.
+  const resolved = opts.catalog ?? { providers: [], models: [], tiers: {}, routes: ROUTES, prices: [], keys: new Map<string, string>() };
+  // The Core still boots with no providers, so the app opens on a clean first run. Chat and
+  // reasoning don't work until at least one provider is configured (API keys in the .env file, or a
+  // Kiro login); memory, goals, devices and the dashboard still work. There is no in-app key entry yet.
+  if (resolved.providers.length === 0) {
+    logger.warn('No AI provider configured yet. Add a key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, OLLAMA_BASE_URL) or enable Kiro to start thinking.');
+  }
 
   const dataDir = resolve(env.FEROXES_DATA_DIR);
   const dbPath = opts.dbPath ?? join(dataDir, 'feroxes.db');
@@ -87,11 +97,24 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   const extraction = new ExtractionService({ router, memory, clock });
   const consolidation = new ConsolidationService({ router, memory, clock });
 
-  // ---- devices: the hub's signing key is persisted, because paired apps pin its public key ----
+  // ---- vault: every credential at rest is sealed (AES-256-GCM); the key lives outside the DB ----
+  const { vault, source: vaultKeySource } = loadVault(process.env, dataDir, { ephemeral: dbPath === ':memory:' });
+  const secrets = new SecretStore(vault, stores.docs);
+
+  // ---- AI providers (Settings → Providers): keys sealed in the vault, applied to the live router ----
+  const providers = new Providers({ docs: stores.docs, secrets, catalog, adapters, prices, router, health, logger, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+  if (!opts.catalog) {
+    providers.importFromEnv(env);
+    providers.apply();
+  }
+
+  // ---- devices: the hub's signing key is persisted (sealed), because paired apps pin its public key ----
   const registry: DeviceRegistry = { put: async (d) => stores.docs.put('device', d), list: async () => stores.docs.list<DeviceRecord>('device') };
-  const savedKey = stores.docs.get<{ id: string; pkcs8: string }>('secret', 'device_signing_key');
-  const hub = new DeviceHub({ registry, system, clock, logger, ...(savedKey ? { signingKeyPkcs8: savedKey.pkcs8 } : {}) });
-  if (!savedKey) stores.docs.put('secret', { id: 'device_signing_key', pkcs8: hub.exportSigningKey() });
+  const legacyKey = stores.docs.get<{ id: string; pkcs8: string }>('secret', 'device_signing_key'); // plaintext, before the vault
+  const savedKey = secrets.get('device_signing_key') ?? legacyKey?.pkcs8;
+  const hub = new DeviceHub({ registry, system, clock, logger, ...(savedKey ? { signingKeyPkcs8: savedKey } : {}) });
+  if (!secrets.has('device_signing_key')) secrets.put('device_signing_key', savedKey ?? hub.exportSigningKey());
+  if (legacyKey) stores.docs.delete('secret', 'device_signing_key');
   await hub.init();
 
   // ---- policy and tools ----
@@ -103,6 +126,10 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   const tools = new ToolRegistry();
   tools.register(timeNow).register(planUpdate(new InMemoryPlanStore())).register(notifyOwner((n) => notify(n))).register(webFetch());
   for (const t of [...fileTools(workspace), ...memoryTools(memory), ...createDeviceTools(hub)]) tools.register(t);
+
+  // ---- integrations: credentials sealed in the vault, every action a policy-gated tool ----
+  const connectors = new ConnectorManager({ connectors: builtinConnectors(), docs: stores.docs, vault: secrets, audit, clock, logger, ...(opts.fetch ? { fetch: opts.fetch } : {}), redirectUri: () => `http://127.0.0.1:${env.FEROXES_PORT}/oauth/callback` });
+  for (const t of connectors.tools()) tools.register(t);
   const toolRuntime = new ToolRuntime({ registry: tools, policy, approvals, audit, system, calls: stores.toolCalls, artifacts: stores.artifacts, timeZone: env.FEROXES_TIMEZONE, clock, logger, notify: (n) => notify({ ...n, urgency: 'low' }) });
 
   // ---- agent + brain ----
@@ -171,7 +198,7 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
     events,
     clock,
     logger,
-    toolsets: () => ['memory', 'time', 'plan', 'notify', 'files', 'web', ...brain.toolsets, ...deviceToolsets(hub)],
+    toolsets: () => ['memory', 'time', 'plan', 'notify', 'files', 'web', ...brain.toolsets, ...deviceToolsets(hub), ...connectors.toolsets()],
     onTurnComplete: ({ sessionId }) => {
       clearTimeout(pendingExtraction.get(sessionId));
       pendingExtraction.set(sessionId, setTimeout(() => void extractNow(sessionId), 2 * MINUTE).unref());
@@ -210,6 +237,15 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
   // ---- background daemons ----
   brain.scheduler.add({ name: 'budget.sweep', every: MINUTE, priority: 'none', run: () => budget.sweepExpired() });
   brain.scheduler.add({ name: 'devices.sweep', every: MINUTE, priority: 'none', run: async () => hub.sweep() });
+  brain.scheduler.add({
+    name: 'connectors.health',
+    every: 360 * MINUTE,
+    priority: 'none',
+    run: async () => {
+      for (const c of connectors.connections()) await connectors.check(c.id).catch(() => undefined);
+      return connectors.connections().length;
+    },
+  });
   brain.scheduler.add({
     name: 'spend.anomaly',
     every: 5 * MINUTE,
@@ -264,6 +300,11 @@ export async function createFeroxes(env: Env, opts: { clock?: Clock; logger?: Lo
     hub,
     brain,
     voice,
+    secrets,
+    providers,
+    connectors,
+    vaultKeySource,
+    dataDir,
     notifications,
     onNotification(cb: (n: Notification) => void) {
       notificationListeners.add(cb);

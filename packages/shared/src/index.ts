@@ -10,3 +10,4 @@ export * from './events.ts';
 export * from './domain.ts';
 export * from './mutex.ts';
 export * from './time-zone.ts';
+export * from './secrets.ts';

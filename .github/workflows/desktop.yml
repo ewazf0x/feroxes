@@ -1,0 +1,129 @@
+name: Desktop
+
+# Builds the Feroxes PC app installers for macOS, Windows and Linux: on pull requests that touch the
+# app or the Core, when a version tag (v*) is pushed, or manually from the Actions tab.
+# Installers are attached to each run as artifacts.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "apps/core/**"
+      - "packages/**"
+      - "scripts/build-*.mjs"
+      - "package.json"
+      - "tsconfig*.json"
+      - ".github/workflows/desktop.yml"
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            node: darwin-arm64
+          # Intel Macs: cross-compiled on Apple Silicon (the Intel macOS runners are retired); the
+          # bundled Node is the x64 build so it runs natively there.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            node: darwin-x64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            node: linux-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            node: win-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      # The Tauri project lives in apps/desktop/src-tauri; let the CLI find it from the repo root.
+      TAURI_CLI_CONFIG_DEPTH: "5"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # Node 24+ runs the bundled Core (node:sqlite is built in). No pnpm cache: there is no
+      # lockfile yet (setup-node's cache requires one).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - run: pnpm install --no-frozen-lockfile
+
+      # The Core must typecheck and pass its tests. Only Linux is required for now (the tests have
+      # not been run on Windows/macOS before); the others report but don't block the installer.
+      - name: Verify the Core
+        run: pnpm run check
+        continue-on-error: ${{ runner.os != 'Linux' }}
+
+      # Build the UI, compile the Core to a self-contained JS tree, and stage Tauri resources.
+      - name: Stage desktop resources
+        run: pnpm run desktop:stage
+
+      # Drive the packaged Core exactly as the shell does (handshake, attach check, UI on the Core's
+      # origin, clean exit when the app's pipe closes, refusal on a taken port), on every OS.
+      - name: Smoke-test the packaged Core
+        run: node scripts/smoke-desktop.mjs
+
+      # Bundle the same Node version for the target platform, so the installed app needs nothing
+      # pre-installed.
+      - name: Bundle the Node runtime
+        shell: bash
+        run: |
+          V="$(node -p process.version)"
+          DEST=apps/desktop/src-tauri/resources/runtime
+          mkdir -p "$DEST"
+          if [ "${{ matrix.node }}" = "win-x64" ]; then
+            curl -fsSL -o "$DEST/node.exe" "https://nodejs.org/dist/$V/win-x64/node.exe"
+          else
+            curl -fsSL "https://nodejs.org/dist/$V/node-$V-${{ matrix.node }}.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+            cp "$RUNNER_TEMP/node-$V-${{ matrix.node }}/bin/node" "$DEST/node"
+            chmod +x "$DEST/node"
+          fi
+          ls -la "$DEST"
+
+      - name: Generate app icons
+        run: pnpm run desktop:icons
+
+      - name: Build the app
+        run: pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: feroxes-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe

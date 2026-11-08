@@ -27,8 +27,13 @@ export const EnvSchema = z.object({
   ELEVENLABS_VOICE_ID: z.string().default('21m00Tcm4TlvDq8ikWAM'),
   ELEVENLABS_TTS_MODEL: z.string().default('eleven_flash_v2_5'),
   ELEVENLABS_STT_MODEL: z.string().default('scribe_v2'),
-  /** Port the apps connect to (device WebSocket + API, next milestone). */
+  /** Port of the local API, the UI and the device endpoint (ws://127.0.0.1:<port>/devices). */
   FEROXES_PORT: z.coerce.number().int().default(7311),
+  /** Comma-separated extra addresses that serve ONLY the device endpoint, e.g. the PC's Tailscale
+   *  IP (100.x.y.z) so the phone can connect over WireGuard. Empty = loopback only. */
+  FEROXES_DEVICE_HOSTS: z.string().default(''),
+  /** Start the PC device agent with the Core and pair it automatically (the desktop app sets this). */
+  FEROXES_LOCAL_AGENT: z.stringbool().default(false),
 
   // --- Kiro as the main brain (owner's explicit choice; see docs/07) ---
   /** Kiro is the default reasoning engine when on and reachable; API models are the fallback. */

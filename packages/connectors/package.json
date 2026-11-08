@@ -1,0 +1,20 @@
+{
+  "name": "@feroxes/connectors",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Integrations: one framework for authentication (OAuth 2.0 + PKCE, tokens), connections, permission scopes, token refresh, revocation, health, audit, and policy-gated tools; connectors for official APIs.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@feroxes/policy": "workspace:*",
+    "@feroxes/shared": "workspace:*",
+    "@feroxes/tools": "workspace:*",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@feroxes/agent": "workspace:*",
+    "@feroxes/brain": "workspace:*"
+  }
+}

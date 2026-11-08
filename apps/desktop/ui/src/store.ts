@@ -64,8 +64,15 @@ export function connect(): () => void {
 
 export function navigate(to: string): void {
   if (route.peek() === to) return;
-  location.hash = to;
+  route.set(to); // set directly: hash changes are blocked in some embedded/opaque origins
+  try {
+    history.pushState(null, '', `#${to}`);
+  } catch {
+    /* no history in this context; the route still changes */
+  }
 }
-window.addEventListener('hashchange', () => route.set(location.hash.slice(1) || 'today'));
+const fromHash = () => route.set(location.hash.slice(1) || 'today');
+window.addEventListener('hashchange', fromHash);
+window.addEventListener('popstate', fromHash);
 
 export type { Signal };
